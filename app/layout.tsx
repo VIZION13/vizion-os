@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { MobileNav } from '@/components/layout/MobileNav'
+import { VizionChat } from '@/components/chat/VizionChat'
 
 export const metadata: Metadata = {
   title: 'VIZION OS v2',
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </main>
         </div>
         <MobileNav />
+        <VizionChat />
       </body>
     </html>
   )
