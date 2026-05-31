@@ -11,12 +11,6 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: 'black-translucent',
     title: 'VIZION OS',
-    startupImage: [
-      {
-        url: '/splash.png',
-        media: '(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)',
-      },
-    ],
   },
   icons: {
     apple: [
@@ -24,10 +18,6 @@ export const metadata: Metadata = {
       { url: '/icon-512.png', sizes: '512x512' },
     ],
     icon: '/icon-192.png',
-  },
-  other: {
-    'mobile-web-app-capable': 'yes',
-    'apple-touch-fullscreen': 'yes',
   },
 }
 
