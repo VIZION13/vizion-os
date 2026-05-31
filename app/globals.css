@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --background: 240 10% 4%;
+  --foreground: 0 0% 95%;
+  --card: 240 8% 8%;
+  --card-foreground: 0 0% 95%;
+  --primary: 270 65% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 6% 12%;
+  --secondary-foreground: 0 0% 80%;
+  --muted: 240 5% 15%;
+  --muted-foreground: 240 4% 55%;
+  --accent: 285 80% 70%;
+  --accent-foreground: 0 0% 100%;
+  --border: 240 6% 14%;
+  --input: 240 6% 12%;
+  --ring: 270 65% 60%;
+  --radius: 1rem;
+
+  --font-display: 'Syne', system-ui;
+  --font-sans: 'Space Grotesk', system-ui;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: #080810;
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Background mesh */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% -10%, rgba(123,47,190,0.25) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 110%, rgba(0,180,216,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 50% 50%, rgba(155,93,229,0.05) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Glass morphism utility */
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.glass-card {
+  background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Neon glow text */
+.text-neon {
+  color: #C77DFF;
+  text-shadow: 0 0 20px rgba(199,125,255,0.5);
+}
+
+.text-glow {
+  text-shadow: 0 0 30px rgba(155,93,229,0.6);
+}
+
+/* Neon border */
+.border-neon {
+  border: 1px solid rgba(155,93,229,0.4);
+  box-shadow: 0 0 20px rgba(155,93,229,0.15), inset 0 0 20px rgba(155,93,229,0.05);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(155,93,229,0.3);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(155,93,229,0.6); }
+
+/* Selection */
+::selection {
+  background: rgba(155,93,229,0.3);
+  color: white;
+}
+
+/* Font display */
+.font-display { font-family: var(--font-display); }
+
+/* Shimmer loading */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.03) 0%,
+    rgba(255,255,255,0.08) 50%,
+    rgba(255,255,255,0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* Safe area for iPhone */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pt-safe { padding-top: env(safe-area-inset-top); }
