@@ -45,7 +45,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-[#080810] text-white antialiased">
         <div className="flex min-h-screen relative">
           <Sidebar />
-          <main className="flex-1 md:ml-64 pb-24 md:pb-0 relative z-10 min-h-screen">
+          <main className="flex-1 md:ml-64 pb-24 md:pb-0 pt-safe relative z-10 min-h-screen">
             {children}
           </main>
         </div>
