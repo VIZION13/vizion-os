@@ -409,7 +409,7 @@ export default function AutomixPage() {
 
   function createTubeCurve(amount: number): Float32Array {
     const samples = 256
-    const curve = new Float32Array(samples)
+    const curve: Float32Array<ArrayBuffer> = new Float32Array(samples) as Float32Array<ArrayBuffer>
     for (let i = 0; i < samples; i++) {
       const x = (i * 2) / samples - 1
       curve[i] = ((Math.PI + amount) * x) / (Math.PI + amount * Math.abs(x))
