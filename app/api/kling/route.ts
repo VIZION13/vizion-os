@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     const body: Record<string, any> = {
       model_name: 'kling-v1-5',
       prompt,
-      duration,
+      duration: parseInt(duration),
       aspect_ratio: aspectRatio,
       cfg_scale: 0.5,
       mode: 'std',
