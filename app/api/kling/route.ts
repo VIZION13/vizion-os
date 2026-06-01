@@ -23,14 +23,14 @@ function generateJWT() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, imageUrl, prompt, duration = '8', aspectRatio = '16:9' } = await req.json()
+    const { imageBase64, imageUrl, prompt } = await req.json()
     const token = generateJWT()
 
     const body: Record<string, any> = {
       model_name: 'kling-v1-5',
       prompt,
-      duration: parseInt(duration),
-      aspect_ratio: aspectRatio,
+      duration: 5,
+      aspect_ratio: '16:9',
       cfg_scale: 0.5,
       mode: 'std',
     }
@@ -53,17 +53,10 @@ export async function POST(req: NextRequest) {
     const data = await res.json()
 
     if (!res.ok) {
-      return NextResponse.json({ 
-        error: data.message || 'Kling API error', 
-        code: data.code,
-        details: data 
-      }, { status: res.status })
+      return NextResponse.json({ error: data.message, code: data.code, details: data }, { status: res.status })
     }
 
-    return NextResponse.json({ 
-      taskId: data.data?.task_id, 
-      status: data.data?.task_status 
-    })
+    return NextResponse.json({ taskId: data.data?.task_id, status: data.data?.task_status })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
