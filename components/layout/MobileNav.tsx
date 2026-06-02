@@ -12,8 +12,8 @@ const nav = [
   { href: '/artists',  icon: Users,         label: 'Artists',  color: 'from-sky-600 to-blue-500' },
   { href: '/business', icon: Briefcase,     label: 'Business', color: 'from-amber-600 to-orange-500' },
   { href: '/admin',    icon: ClipboardList, label: 'Admin',    color: 'from-emerald-600 to-teal-500' },
-  { href: '/memory',   icon: Brain,         label: 'Memory',   color: 'from-fuchsia-600 to-purple-600' },
-  { href: '/automix', icon: Zap, label: 'AutoMix', color: 'from-violet-600 to-pink-600' },
+  { href: '/memory',   icon: Brain,         label: 'Memory',
+  { href: '/automix', icon: Zap, label: 'AutoMix', color: 'from-violet-600 to-pink-600' },   color: 'from-fuchsia-600 to-purple-600' },
 ]
 
 export function MobileNav() {
