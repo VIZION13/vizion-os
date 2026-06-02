@@ -467,9 +467,24 @@ export default function AutomixPage() {
 
   async function downloadOrShare(url: string, name: string) {
     try {
-      if (navigator.share) { const blob=await fetch(url).then(r=>r.blob()); await navigator.share({files:[new File([blob],name,{type:'audio/wav'})],title:'VIZION AUTOMIX'}) }
-      else { const a=document.createElement('a');a.href=url;a.download=name;a.click() }
-    } catch { window.open(url,'_blank') }
+      const blob = await fetch(url).then(r => r.blob())
+      const file = new File([blob], name, { type: 'audio/wav' })
+      // iOS Safari — Share Sheet natif (AirDrop, Fichiers, WhatsApp...)
+      if ((navigator as any).canShare && (navigator as any).canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Mon mix VIZION' })
+        return
+      }
+      // Desktop — téléchargement direct
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href) }, 100)
+    } catch {
+      // Dernier recours — ouvre dans nouvel onglet
+      window.open(url, '_blank')
+    }
   }
 
   async function startMix() {
