@@ -142,20 +142,6 @@ export default function AutomixPage() {
         data[i] = early + tail
       }
     }
-  async function downloadOrShare(url: string, filename: string) {
-  try {
-    if (navigator.share) {
-      const response = await fetch(url)
-      const blob = await response.blob()
-      const file = new File([blob], filename, { type: 'audio/wav' })
-      await navigator.share({ files: [file], title: 'VIZION AUTOMIX' })
-    } else {
-      const a = document.createElement('a')
-      a.href = url; a.download = filename; a.click()
-    }
-  } catch {
-    window.open(url, '_blank')
-  }
 }
     return buf
   }
@@ -188,7 +174,21 @@ export default function AutomixPage() {
     }
     return new Blob([ab], { type: 'audio/wav' })
   }
-
+async function downloadOrShare(url: string, filename: string) {
+  try {
+    if (navigator.share) {
+      const response = await fetch(url)
+      const blob = await response.blob()
+      const file = new File([blob], filename, { type: 'audio/wav' })
+      await navigator.share({ files: [file], title: 'VIZION AUTOMIX' })
+    } else {
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+    }
+  } catch {
+    window.open(url, '_blank')
+  }
+}
   async function processAndMix() {
     if (!recordedBlob || !instruFile) return
     setStep('mixing')
