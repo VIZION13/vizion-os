@@ -300,6 +300,12 @@ export default function AutomixPage() {
   const [showEQ, setShowEQ] = useState(false)
   const [showValhalla, setShowValhalla] = useState(true)
   const [noiseGate, setNoiseGate] = useState(true)
+  const [enableAutotune, setEnableAutotune] = useState(true)
+  const [enableAvalon, setEnableAvalon] = useState(true)
+  const [enableTubeTech, setEnableTubeTech] = useState(true)
+  const [enableEQ, setEnableEQ] = useState(true)
+  const [enableValhalla, setEnableValhalla] = useState(true)
+  const [aiDetails, setAiDetails] = useState<Record<string, string>>({})
 
   const instruRef = useRef<HTMLInputElement>(null)
   const instruAudioRef = useRef<HTMLAudioElement|null>(null)
@@ -315,45 +321,123 @@ export default function AutomixPage() {
   // ── IA PROPOSE SETTINGS PRO ──
   async function getAISettings() {
     setLoadingAI(true)
+    setAiSuggestion(null)
+    setAiDetails({})
     try {
-      const res = await fetch('/api/automix', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          stems: ['vocal', 'instru'],
-          genre,
-          style: keyInfo?.genre_detected || genre,
-          reference: `${keyInfo?.key} ${keyInfo?.mode} ${keyInfo?.bpm}bpm`,
+          module: 'music',
+          messages: [{
+            role: 'user',
+            content: `Tu es un ingénieur du son expert. Génère les réglages EXACTS et OPTIMAUX pour ce mix vocal:
+Genre: ${genre}
+Tonalité: ${keyInfo?.key} ${keyInfo?.mode}
+BPM: ${keyInfo?.bpm}
+
+Réponds UNIQUEMENT en JSON:
+{
+  "autotune": { "retuneSpeed": 5, "humanize": 10, "pitchAmount": 95, "tip": "explication courte" },
+  "avalon": { "preampGain": 18, "highPass": 80, "bass": 1, "lowMid": -2, "highMid": 4, "treble": 3, "threshold": -22, "ratio": 4, "attack": 8, "release": 180, "tip": "explication courte" },
+  "tubeTech": { "gain": 8, "ratio": 3, "threshold": -20, "attack": 15, "release": 250, "tip": "explication courte" },
+  "eq": [
+    {"freq": 80, "gain": 0, "q": 0.7, "type": "highpass", "enabled": true},
+    {"freq": 200, "gain": -3, "q": 1.5, "type": "peaking", "enabled": true},
+    {"freq": 800, "gain": -1.5, "q": 1.2, "type": "peaking", "enabled": true},
+    {"freq": 3000, "gain": 3, "q": 1.0, "type": "peaking", "enabled": true},
+    {"freq": 8000, "gain": 2, "q": 1.2, "type": "peaking", "enabled": true},
+    {"freq": 15000, "gain": 3, "q": 0.7, "type": "highshelf", "enabled": true}
+  ],
+  "eqTip": "explication courte",
+  "valhalla": { "mode": "plate", "color": "1980s", "mix": 22, "decay": 1.8, "predelay": 18, "modRate": 2.5, "modDepth": 35, "size": 90, "tip": "explication courte" },
+  "globalTip": "conseil global en 1 phrase"
+}`
+          }]
         })
       })
-      const data = await res.json()
-      const s = data.strategy?.stems?.vocal
 
-      if (s) {
-        // Apply AI suggested settings
-        setAvalon(prev => ({
-          ...prev,
-          threshold: s.compression?.threshold ?? -20,
-          ratio: s.compression?.ratio ?? 4,
-          highMid: s.eq?.presence ?? 3,
-          treble: s.eq?.high ?? 2,
-          bass: s.eq?.low ?? 1,
-        }))
-        setTubeTech(prev => ({
-          ...prev,
-          threshold: (s.compression?.threshold ?? -18) - 4,
-          ratio: Math.min((s.compression?.ratio ?? 3) * 0.8, 10),
-        }))
-        // Set valhalla by genre
-        const g = genre.toLowerCase()
-        if (g.includes('trap') || g.includes('drill')) setValhalla(prev => ({ ...prev, mode:'plate', mix:20, decay:1.5 }))
-        else if (g.includes('r&b')) setValhalla(prev => ({ ...prev, mode:'smooth', mix:30, decay:2.5 }))
-        else if (g.includes('afro')) setValhalla(prev => ({ ...prev, mode:'room', mix:25, decay:1.8 }))
-        else setValhalla(prev => ({ ...prev, mode:'plate', mix:25, decay:2.0 }))
-
-        setAiSuggestion(data.strategy?.tips || 'Réglages pro appliqués automatiquement ✓')
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      let full = ''
+      while (reader) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n').filter(l => l.startsWith('data: '))) {
+          const d = line.replace('data: ', '')
+          if (d === '[DONE]') break
+          try { full += JSON.parse(d).text } catch {}
+        }
       }
-    } catch { setAiSuggestion('Réglages par défaut appliqués') }
+
+      const parsed = JSON.parse(full.replace(/```json|```/g, '').trim())
+
+      // Apply all AI settings
+      if (parsed.autotune) {
+        setAt(prev => ({
+          ...prev,
+          retuneSpeed: parsed.autotune.retuneSpeed ?? prev.retuneSpeed,
+          humanize: parsed.autotune.humanize ?? prev.humanize,
+          pitchAmount: parsed.autotune.pitchAmount ?? prev.pitchAmount,
+        }))
+      }
+      if (parsed.avalon) {
+        setAvalon({
+          preampGain: parsed.avalon.preampGain ?? 12,
+          highPass: parsed.avalon.highPass ?? 80,
+          threshold: parsed.avalon.threshold ?? -20,
+          ratio: parsed.avalon.ratio ?? 4,
+          attack: parsed.avalon.attack ?? 10,
+          release: parsed.avalon.release ?? 200,
+          bass: parsed.avalon.bass ?? 1,
+          lowMid: parsed.avalon.lowMid ?? -2,
+          highMid: parsed.avalon.highMid ?? 3,
+          treble: parsed.avalon.treble ?? 2,
+          output: 0,
+        })
+      }
+      if (parsed.tubeTech) {
+        setTubeTech({
+          gain: parsed.tubeTech.gain ?? 6,
+          ratio: parsed.tubeTech.ratio ?? 3,
+          threshold: parsed.tubeTech.threshold ?? -18,
+          attack: parsed.tubeTech.attack ?? 10,
+          release: parsed.tubeTech.release ?? 300,
+        })
+      }
+      if (parsed.eq && Array.isArray(parsed.eq)) setEqBands(parsed.eq)
+      if (parsed.valhalla) {
+        setValhalla({
+          mode: parsed.valhalla.mode ?? 'plate',
+          color: parsed.valhalla.color ?? '1980s',
+          mix: parsed.valhalla.mix ?? 25,
+          decay: parsed.valhalla.decay ?? 2.2,
+          predelay: parsed.valhalla.predelay ?? 20,
+          modRate: parsed.valhalla.modRate ?? 2.53,
+          modDepth: parsed.valhalla.modDepth ?? 38,
+          size: parsed.valhalla.size ?? 100,
+        })
+      }
+
+      // Store tips per plugin
+      setAiDetails({
+        autotune: parsed.autotune?.tip || '',
+        avalon: parsed.avalon?.tip || '',
+        tubeTech: parsed.tubeTech?.tip || '',
+        eq: parsed.eqTip || '',
+        valhalla: parsed.valhalla?.tip || '',
+      })
+      setAiSuggestion(parsed.globalTip || 'Réglages pro appliqués ✓')
+
+      // Auto-open panels to show settings
+      setShowAvalon(true)
+      setShowTubeTech(true)
+      setShowEQ(false)
+      setShowValhalla(true)
+
+    } catch (e) {
+      setAiSuggestion('Erreur — réglages par défaut appliqués')
+    }
     setLoadingAI(false)
   }
 
@@ -602,7 +686,7 @@ export default function AutomixPage() {
             <p className="text-white font-semibold text-lg mb-1">Upload ton instru</p>
             <p className="text-white/40 text-sm">MP3, WAV — L'IA détecte la tonalité</p>
           </div>
-          <input ref={instruRef} type="file" accept="audio/*,.mp3,.wav,.m4a,.aac" onChange={e=>{const f=e.target.files?.[0];if(f)handleInstruUpload(f)}} className="hidden"/>
+          <input ref={instruRef} type="file" accept="audio/*" onChange={e=>{const f=e.target.files?.[0];if(f)handleInstruUpload(f)}} className="hidden"/>
         </div>
       )}
 
@@ -698,12 +782,18 @@ export default function AutomixPage() {
           </div>
 
           {/* AUTOTUNE */}
-          <div className="glass-card rounded-3xl border border-pink-500/20 p-5">
-            <div className="flex items-center gap-2 mb-4">
+          <div className={`glass-card rounded-3xl border p-5 transition-all ${enableAutotune ? 'border-pink-500/20' : 'border-white/8 opacity-50'}`}>
+            <div className="flex items-center gap-2 mb-1">
               <span className="text-lg">🤖</span>
               <p className="text-pink-400 font-bold text-sm">AUTO-TUNE EVO</p>
-              <span className="ml-auto text-xs text-pink-300 bg-pink-500/20 px-2 py-0.5 rounded-lg">{atLabel}</span>
+              <span className="text-xs text-pink-300 bg-pink-500/20 px-2 py-0.5 rounded-lg">{atLabel}</span>
+              <button onClick={()=>setEnableAutotune(!enableAutotune)}
+                className={`ml-auto w-10 h-5 rounded-full transition-all flex-shrink-0 ${enableAutotune?'bg-pink-500':'bg-white/20'}`}>
+                <div className={`w-4 h-4 rounded-full bg-white shadow mx-0.5 transition-all ${enableAutotune?'translate-x-5':'translate-x-0'}`}/>
+              </button>
             </div>
+            {aiDetails.autotune && <p className="text-pink-300/60 text-xs mb-3 italic">💡 {aiDetails.autotune}</p>}
+            <div className={enableAutotune ? '' : 'pointer-events-none'}>
             <div className="space-y-3">
               {[{k:'retuneSpeed',l:'Retune Speed',lL:'T-Pain 🤖',rL:'Natural'},{k:'humanize',l:'Humanize',lL:'Robot',rL:'Humain'},{k:'pitchAmount',l:'Pitch Amount',lL:'0%',rL:'100%'}].map(({k,l,lL,rL})=>(
                 <div key={k}>
@@ -732,16 +822,25 @@ export default function AutomixPage() {
                 ))}
               </div>
             </div>
+            </div>
           </div>
 
           {/* AVALON */}
           <div className="glass-card rounded-3xl border border-amber-500/20 p-5">
             <button onClick={()=>setShowAvalon(!showAvalon)} className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2"><span className="text-lg">🎛️</span><p className="text-amber-400 font-bold text-sm">AVALON 737sp</p><span className="text-white/30 text-xs">Vacuum Tube</span></div>
-              {showAvalon?<ChevronUp size={16} className="text-white/40"/>:<ChevronDown size={16} className="text-white/40"/>}
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-lg">🎛️</span><p className="text-amber-400 font-bold text-sm">AVALON 737sp</p>
+                <span className="text-white/30 text-xs">Vacuum Tube</span>
+                <button onClick={e=>{e.stopPropagation();setEnableAvalon(!enableAvalon)}}
+                  className={`ml-auto w-10 h-5 rounded-full transition-all flex-shrink-0 ${enableAvalon?'bg-amber-500':'bg-white/20'}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white shadow mx-0.5 transition-all ${enableAvalon?'translate-x-5':'translate-x-0'}`}/>
+                </button>
+              </div>
+              {showAvalon?<ChevronUp size={16} className="text-white/40 flex-shrink-0"/>:<ChevronDown size={16} className="text-white/40 flex-shrink-0"/>}
             </button>
+            {aiDetails.avalon && <p className="text-amber-300/60 text-xs mt-1 italic">💡 {aiDetails.avalon}</p>}
             {showAvalon&&(
-              <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className={`mt-4 grid grid-cols-2 gap-3 ${!enableAvalon?'opacity-40 pointer-events-none':''}`}>
                 {[{k:'preampGain',l:'Preamp Gain',min:0,max:30,u:'dB'},{k:'highPass',l:'High Pass',min:30,max:140,u:'Hz'},{k:'bass',l:'Bass 75Hz',min:-12,max:12,u:'dB'},{k:'lowMid',l:'Low Mid',min:-12,max:12,u:'dB'},{k:'highMid',l:'High Mid 3kHz',min:-12,max:12,u:'dB'},{k:'treble',l:'Treble 15kHz',min:-12,max:12,u:'dB'},{k:'threshold',l:'Threshold',min:-40,max:0,u:'dB'},{k:'ratio',l:'Ratio',min:2,max:10,s:0.5,u:':1'}].map(({k,l,min,max,u,s}:{k:string,l:string,min:number,max:number,u:string,s?:number})=>(
                   <div key={k}>
                     <p className="text-white/40 text-xs mb-1">{l}</p>
@@ -756,11 +855,19 @@ export default function AutomixPage() {
           {/* TUBE-TECH */}
           <div className="glass-card rounded-3xl border border-blue-500/20 p-5">
             <button onClick={()=>setShowTubeTech(!showTubeTech)} className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2"><span className="text-lg">🔵</span><p className="text-blue-400 font-bold text-sm">TUBE-TECH CL 1B</p><span className="text-white/30 text-xs">Optical Comp</span></div>
-              {showTubeTech?<ChevronUp size={16} className="text-white/40"/>:<ChevronDown size={16} className="text-white/40"/>}
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-lg">🔵</span><p className="text-blue-400 font-bold text-sm">TUBE-TECH CL 1B</p>
+                <span className="text-white/30 text-xs">Optical Comp</span>
+                <button onClick={e=>{e.stopPropagation();setEnableTubeTech(!enableTubeTech)}}
+                  className={`ml-auto w-10 h-5 rounded-full transition-all flex-shrink-0 ${enableTubeTech?'bg-blue-500':'bg-white/20'}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white shadow mx-0.5 transition-all ${enableTubeTech?'translate-x-5':'translate-x-0'}`}/>
+                </button>
+              </div>
+              {showTubeTech?<ChevronUp size={16} className="text-white/40 flex-shrink-0"/>:<ChevronDown size={16} className="text-white/40 flex-shrink-0"/>}
             </button>
+            {aiDetails.tubeTech && <p className="text-blue-300/60 text-xs mt-1 italic">💡 {aiDetails.tubeTech}</p>}
             {showTubeTech&&(
-              <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className={`mt-4 grid grid-cols-2 gap-3 ${!enableTubeTech?'opacity-40 pointer-events-none':''}`}>
                 {[{k:'gain',l:'Make-up Gain',min:0,max:30,u:'dB'},{k:'ratio',l:'Ratio',min:2,max:10,u:':1'},{k:'threshold',l:'Threshold',min:-40,max:-10,u:'dB'},{k:'attack',l:'Attack',min:1,max:300,u:'ms'},{k:'release',l:'Release',min:50,max:1000,u:'ms'}].map(({k,l,min,max,u})=>(
                   <div key={k}>
                     <p className="text-white/40 text-xs mb-1">{l}</p>
@@ -775,11 +882,19 @@ export default function AutomixPage() {
           {/* PRO-Q4 */}
           <div className="glass-card rounded-3xl border border-emerald-500/20 p-5">
             <button onClick={()=>setShowEQ(!showEQ)} className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2"><span className="text-lg">🎚️</span><p className="text-emerald-400 font-bold text-sm">FABFILTER PRO-Q 4</p><span className="text-white/30 text-xs">{eqBands.filter(b=>b.enabled).length} bandes</span></div>
-              {showEQ?<ChevronUp size={16} className="text-white/40"/>:<ChevronDown size={16} className="text-white/40"/>}
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-lg">🎚️</span><p className="text-emerald-400 font-bold text-sm">FABFILTER PRO-Q 4</p>
+                <span className="text-white/30 text-xs">{eqBands.filter(b=>b.enabled).length} bandes</span>
+                <button onClick={e=>{e.stopPropagation();setEnableEQ(!enableEQ)}}
+                  className={`ml-auto w-10 h-5 rounded-full transition-all flex-shrink-0 ${enableEQ?'bg-emerald-500':'bg-white/20'}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white shadow mx-0.5 transition-all ${enableEQ?'translate-x-5':'translate-x-0'}`}/>
+                </button>
+              </div>
+              {showEQ?<ChevronUp size={16} className="text-white/40 flex-shrink-0"/>:<ChevronDown size={16} className="text-white/40 flex-shrink-0"/>}
             </button>
+            {aiDetails.eq && <p className="text-emerald-300/60 text-xs mt-1 italic">💡 {aiDetails.eq}</p>}
             {showEQ&&(
-              <div className="mt-4 space-y-3">
+              <div className={`mt-4 space-y-3 ${!enableEQ?'opacity-40 pointer-events-none':''}`}>
                 <div className="flex gap-2 flex-wrap mb-2">
                   {Object.keys(EQ_PRESETS).map(p=><button key={p} onClick={()=>setEqBands(EQ_PRESETS[p])} className="px-3 py-1 rounded-lg text-xs bg-white/5 border border-white/10 text-white/50 hover:bg-emerald-500/20 hover:text-emerald-300 transition-all capitalize">{p}</button>)}
                 </div>
@@ -803,11 +918,19 @@ export default function AutomixPage() {
           {/* VALHALLA */}
           <div className="glass-card rounded-3xl border border-violet-500/20 p-5">
             <button onClick={()=>setShowValhalla(!showValhalla)} className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2"><span className="text-lg">🏔️</span><p className="text-violet-400 font-bold text-sm">VALHALLA VINTAGEVERT</p><span className="text-white/30 text-xs">{VALHALLA_MODES.find(m=>m.id===valhalla.mode)?.label} · {valhalla.color}</span></div>
-              {showValhalla?<ChevronUp size={16} className="text-white/40"/>:<ChevronDown size={16} className="text-white/40"/>}
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-lg">🏔️</span><p className="text-violet-400 font-bold text-sm">VALHALLA</p>
+                <span className="text-white/30 text-xs">{VALHALLA_MODES.find(m=>m.id===valhalla.mode)?.label} · {valhalla.color}</span>
+                <button onClick={e=>{e.stopPropagation();setEnableValhalla(!enableValhalla)}}
+                  className={`ml-auto w-10 h-5 rounded-full transition-all flex-shrink-0 ${enableValhalla?'bg-violet-500':'bg-white/20'}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white shadow mx-0.5 transition-all ${enableValhalla?'translate-x-5':'translate-x-0'}`}/>
+                </button>
+              </div>
+              {showValhalla?<ChevronUp size={16} className="text-white/40 flex-shrink-0"/>:<ChevronDown size={16} className="text-white/40 flex-shrink-0"/>}
             </button>
+            {aiDetails.valhalla && <p className="text-violet-300/60 text-xs mt-1 italic">💡 {aiDetails.valhalla}</p>}
             {showValhalla&&(
-              <div className="mt-4 space-y-4">
+              <div className={`mt-4 space-y-4 ${!enableValhalla?'opacity-40 pointer-events-none':''}`}>
                 <div className="grid grid-cols-3 gap-2">
                   {VALHALLA_MODES.map(m=><button key={m.id} onClick={()=>setValhalla(p=>({...p,mode:m.id}))} className={`p-2.5 rounded-2xl text-center border transition-all ${valhalla.mode===m.id?'bg-violet-500/30 border-violet-500/50':'bg-white/3 border-white/8'}`}><p className="text-lg mb-0.5">{m.icon}</p><p className={`text-xs font-medium ${valhalla.mode===m.id?'text-violet-300':'text-white/40'}`}>{m.label}</p></button>)}
                 </div>
