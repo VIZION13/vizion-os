@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Mic, MicOff, Upload, Download, Zap, Check, RefreshCw, Music2, Play, Pause } from 'lucide-react'
+import { Mic, MicOff, Upload, Download, Zap, Check, RefreshCw, Music2, Play, Pause, Settings } from 'lucide-react'
 
-type Step = 'upload' | 'analyzing' | 'ready' | 'recording' | 'mixing' | 'done'
+type Step = 'upload' | 'analyzing' | 'record' | 'recording' | 'tune' | 'mixing' | 'done'
 
 interface KeyInfo {
   key: string
@@ -16,7 +16,16 @@ interface KeyInfo {
   genre_detected: string
 }
 
+interface AutotuneSettings {
+  retuneSpeed: number      // 0 = instant T-Pain, 100 = slow natural
+  humanize: number         // 0-100 preserve naturalness on long notes
+  pitchAmount: number      // 0-100 correction intensity
+  formant: boolean         // preserve vocal timbre
+  activeNotes: string[]    // notes actives dans la gamme
+}
+
 const GENRES = ['Trap', 'Drill', 'Afro', 'R&B', 'Pop', 'Rap FR', 'Dancehall']
+const ALL_NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 const SCALE_SEMITONES: Record<string, number[]> = {
   'C major':[0,2,4,5,7,9,11],'C minor':[0,2,3,5,7,8,10],
@@ -36,18 +45,20 @@ const SCALE_SEMITONES: Record<string, number[]> = {
   'B major':[11,1,3,4,6,8,10],'B minor':[11,1,2,4,6,7,9],
 }
 
-function freqToMidi(freq: number): number { return 69 + 12 * Math.log2(freq / 440) }
+function freqToMidi(f: number) { return 69 + 12 * Math.log2(f / 440) }
 
-function snapToScale(midiNote: number, scaleKey: string): number {
-  const semitones = SCALE_SEMITONES[scaleKey] || SCALE_SEMITONES['A minor']
-  const noteInOctave = ((Math.round(midiNote) % 12) + 12) % 12
-  let closest = semitones[0], minDist = 12
-  for (const s of semitones) {
-    const dist = Math.min(Math.abs(noteInOctave - s), 12 - Math.abs(noteInOctave - s))
-    if (dist < minDist) { minDist = dist; closest = s }
+function snapToActiveNotes(midiNote: number, activeNotes: string[]): number {
+  const noteIdx = ALL_NOTES
+  const noteInOct = ((Math.round(midiNote) % 12) + 12) % 12
+  let closest = noteInOct, minDist = 12
+  for (const n of activeNotes) {
+    const idx = noteIdx.indexOf(n)
+    if (idx < 0) continue
+    const dist = Math.min(Math.abs(noteInOct - idx), 12 - Math.abs(noteInOct - idx))
+    if (dist < minDist) { minDist = dist; closest = idx }
   }
-  const octave = Math.floor(midiNote / 12)
-  let snapped = octave * 12 + closest
+  const oct = Math.floor(midiNote / 12)
+  let snapped = oct * 12 + closest
   if (Math.abs(snapped - midiNote) > 6) snapped += 12
   return snapped
 }
@@ -65,43 +76,72 @@ function detectPitchACF(frame: Float32Array, sr: number): number {
     const norm = corr / (Math.sqrt(n1 * n2) + 1e-10)
     if (norm > bestC) { bestC = norm; bestP = p }
   }
-  if (bestC < 0.3 || bestP === 0) return 0
+  if (bestC < 0.25 || bestP === 0) return 0
   return sr / bestP
 }
 
-function pitchShiftFrame(frame: Float32Array<ArrayBuffer>, ratio: number): Float32Array<ArrayBuffer> {
-  if (Math.abs(ratio - 1.0) < 0.001) return frame
-  const out: Float32Array<ArrayBuffer> = new Float32Array(frame.length) as Float32Array<ArrayBuffer>
+function pitchShiftFrameF(frame: Float32Array, ratio: number): Float32Array {
+  if (Math.abs(ratio - 1.0) < 0.001) return new Float32Array(frame)
+  const out = new Float32Array(frame.length)
   for (let i = 0; i < frame.length; i++) {
     const src = i * ratio
     const i0 = Math.floor(src), i1 = Math.min(i0 + 1, frame.length - 1)
-    const f = src - i0
-    out[i] = i0 < frame.length ? frame[i0] * (1 - f) + (i1 < frame.length ? frame[i1] * f : 0) : 0
+    out[i] = i0 < frame.length ? frame[i0] * (1 - (src - i0)) + frame[i1] * (src - i0) : 0
   }
   return out
 }
 
-function applyHardAutotune(ctx: OfflineAudioContext, buffer: AudioBuffer, scaleKey: string, strength: number): AudioBuffer {
+function applyAutotune(
+  ctx: OfflineAudioContext,
+  buffer: AudioBuffer,
+  settings: AutotuneSettings
+): AudioBuffer {
+  const { retuneSpeed, humanize, pitchAmount, activeNotes } = settings
+  if (activeNotes.length === 0 || pitchAmount === 0) return buffer
+
   const sr = buffer.sampleRate
+  // Retune speed: 0=instant (T-Pain), 100=slow. Map to smoothing factor
+  const smoothing = retuneSpeed / 100 * 0.95
+  const strength = pitchAmount / 100
   const frameSize = 1024, hopSize = 256
   const numCh = buffer.numberOfChannels
-  const outBuffer = ctx.createBuffer(numCh, buffer.length, sr)
+  const out = ctx.createBuffer(numCh, buffer.length, sr)
+
   for (let ch = 0; ch < numCh; ch++) {
     const input = buffer.getChannelData(ch)
-    const output = outBuffer.getChannelData(ch)
+    const output = out.getChannelData(ch)
     const accum = new Float32Array(buffer.length)
     const count = new Float32Array(buffer.length)
+
+    let currentPitchRatio = 1.0
     let pos = 0
+
     while (pos + frameSize <= buffer.length) {
-      const frame = input.slice(pos, pos + frameSize)
+      const frame = new Float32Array(frameSize)
+      for (let i = 0; i < frameSize; i++) frame[i] = input[pos + i] || 0
+
       const freq = detectPitchACF(frame, sr)
-      let shifted: Float32Array<ArrayBuffer> = frame as Float32Array<ArrayBuffer>
+      let targetRatio = 1.0
+
       if (freq > 50 && freq < 1200) {
         const midi = freqToMidi(freq)
-        const snapped = snapToScale(midi, scaleKey)
-        const diff = (snapped - midi) * strength
-        shifted = pitchShiftFrame(frame, Math.pow(2, -diff / 12))
+        const snapped = snapToActiveNotes(midi, activeNotes)
+        let diff = (snapped - midi) * strength
+
+        // Humanize: reduce correction on notes near target (simulate natural singing)
+        const centsDiff = Math.abs(snapped - midi) * 100
+        if (humanize > 0 && centsDiff < humanize * 0.5) {
+          diff *= (centsDiff / (humanize * 0.5))
+        }
+
+        targetRatio = Math.pow(2, -diff / 12)
       }
+
+      // Smooth pitch transition (retune speed)
+      currentPitchRatio = currentPitchRatio * smoothing + targetRatio * (1 - smoothing)
+
+      const shifted = pitchShiftFrameF(frame, currentPitchRatio)
+
       for (let i = 0; i < frameSize && pos + i < buffer.length; i++) {
         const hann = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frameSize - 1)))
         accum[pos + i] += shifted[i] * hann
@@ -109,11 +149,12 @@ function applyHardAutotune(ctx: OfflineAudioContext, buffer: AudioBuffer, scaleK
       }
       pos += hopSize
     }
+
     for (let i = 0; i < buffer.length; i++) {
       output[i] = count[i] > 0.001 ? accum[i] / count[i] : 0
     }
   }
-  return outBuffer
+  return out
 }
 
 export default function AutomixPage() {
@@ -121,16 +162,26 @@ export default function AutomixPage() {
   const [instruFile, setInstruFile] = useState<File | null>(null)
   const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null)
   const [genre, setGenre] = useState('Trap')
-  const [autotuneStrength, setAutotuneStrength] = useState(1.0)
   const [recordTime, setRecordTime] = useState(0)
   const [mixedUrl, setMixedUrl] = useState<string | null>(null)
   const [loadingMsg, setLoadingMsg] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
+  const [recordedUrl, setRecordedUrl] = useState<string | null>(null)
   const [vocalLevel, setVocalLevel] = useState(0)
+
+  // Auto-Tune EVO style settings
+  const [atSettings, setAtSettings] = useState<AutotuneSettings>({
+    retuneSpeed: 0,
+    humanize: 0,
+    pitchAmount: 100,
+    formant: true,
+    activeNotes: ['A', 'C', 'D', 'E', 'G'],
+  })
 
   const instruRef = useRef<HTMLInputElement>(null)
   const instruAudioRef = useRef<HTMLAudioElement | null>(null)
+  const vocalAudioRef = useRef<HTMLAudioElement | null>(null)
   const instruUrlRef = useRef<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -146,11 +197,18 @@ export default function AutomixPage() {
     try {
       const fd = new FormData(); fd.append('genre', genre)
       const res = await fetch('/api/detect-key', { method: 'POST', body: fd })
-      setKeyInfo(await res.json())
+      const data = await res.json()
+      setKeyInfo(data)
+      // Auto-set active notes from detected scale
+      const scaleKey = `${data.key} ${data.mode}`
+      const semitones = SCALE_SEMITONES[scaleKey] || [9, 11, 0, 2, 4, 5, 7]
+      const notes = semitones.map((s: number) => ALL_NOTES[s])
+      setAtSettings(prev => ({ ...prev, activeNotes: notes }))
     } catch {
       setKeyInfo({ key:'A', mode:'minor', bpm:140, scale:'A minor', notes:['A','B','C','D','E','F','G'], autotune_recommended_notes:['A','C','D','E','G'], confidence:0.7, genre_detected:genre })
+      setAtSettings(prev => ({ ...prev, activeNotes: ['A', 'C', 'D', 'E', 'G'] }))
     }
-    setStep('ready')
+    setStep('record')
   }
 
   function toggleInstru() {
@@ -182,7 +240,12 @@ export default function AutomixPage() {
       const mr = new MediaRecorder(stream, { mimeType: mt })
       chunksRef.current = []
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
-      mr.onstop = () => { stream.getTracks().forEach(t => t.stop()); setRecordedBlob(new Blob(chunksRef.current, { type: mt })) }
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(chunksRef.current, { type: mt })
+        setRecordedBlob(blob)
+        setRecordedUrl(URL.createObjectURL(blob))
+      }
       mr.start(100); mediaRecorderRef.current = mr
       setStep('recording'); setRecordTime(0)
       timerRef.current = setInterval(() => setRecordTime(t => t + 1), 1000)
@@ -195,9 +258,17 @@ export default function AutomixPage() {
     if (timerRef.current) clearInterval(timerRef.current)
     cancelAnimationFrame(animFrameRef.current); setVocalLevel(0)
     if (instruAudioRef.current) { instruAudioRef.current.pause(); instruAudioRef.current.currentTime = 0; setIsPlaying(false) }
+    setStep('tune')
   }
 
-  useEffect(() => { if (recordedBlob && step === 'recording') processAndMix() }, [recordedBlob])
+  function toggleNote(note: string) {
+    setAtSettings(prev => ({
+      ...prev,
+      activeNotes: prev.activeNotes.includes(note)
+        ? prev.activeNotes.filter(n => n !== note)
+        : [...prev.activeNotes, note]
+    }))
+  }
 
   function createValhallaReverb(ctx: OfflineAudioContext, decay: number): AudioBuffer {
     const sr = ctx.sampleRate, len = Math.floor(sr * decay)
@@ -213,8 +284,7 @@ export default function AutomixPage() {
   }
 
   async function decodeAudio(src: Blob | File): Promise<AudioBuffer> {
-    const ab = await src.arrayBuffer()
-    return new AudioContext().decodeAudioData(ab)
+    return new AudioContext().decodeAudioData(await src.arrayBuffer())
   }
 
   function bufferToWav(buf: AudioBuffer): Blob {
@@ -242,16 +312,15 @@ export default function AutomixPage() {
     } catch { window.open(url, '_blank') }
   }
 
-  async function processAndMix() {
+  async function startMix() {
     if (!recordedBlob || !instruFile) return
     setStep('mixing')
     const [vocalBuf, instruBuf] = await Promise.all([decodeAudio(recordedBlob), decodeAudio(instruFile)])
-    const scaleKey = `${keyInfo?.key||'A'} ${keyInfo?.mode||'minor'}`
-    const duration = Math.max(vocalBuf.duration, instruBuf.duration)
-    const ctx = new OfflineAudioContext(2, Math.ceil(duration*44100), 44100)
 
-    setLoadingMsg('🤖 Pitch Corrector Logic Pro style...')
-    const tuned = applyHardAutotune(ctx, vocalBuf, scaleKey, autotuneStrength)
+    setLoadingMsg('🤖 Autotune en cours...')
+    const duration = Math.max(vocalBuf.duration, instruBuf.duration)
+    const ctx = new OfflineAudioContext(2, Math.ceil(duration * 44100), 44100)
+    const tuned = applyAutotune(ctx, vocalBuf, atSettings)
 
     setLoadingMsg('🎚️ Avalon → Valhalla...')
     const vs = ctx.createBufferSource(); vs.buffer = tuned
@@ -265,13 +334,13 @@ export default function AutomixPage() {
     const rv = ctx.createConvolver(); rv.buffer = createValhallaReverb(ctx, 2.8)
     const rg = ctx.createGain(); rg.gain.value=0.22
     const dg = ctx.createGain(); dg.gain.value=0.85
-    const bpm = keyInfo?.bpm||140
+    const bpm = keyInfo?.bpm || 140
     const dl = ctx.createDelay(1.0); dl.delayTime.value=(60/bpm)*0.5
     const df = ctx.createGain(); df.gain.value=0.2
     const dw = ctx.createGain(); dw.gain.value=0.15
     const vo = ctx.createGain(); vo.gain.value=1.1
     const is = ctx.createBufferSource(); is.buffer=instruBuf
-    const ic = ctx.createDynamicsCompressor(); ic.threshold.value=-12; ic.ratio.value=2; ic.attack.value=0.01; ic.release.value=0.3
+    const ic = ctx.createDynamicsCompressor(); ic.threshold.value=-12; ic.ratio.value=2
     const ig = ctx.createGain(); ig.gain.value=0.75
     const mg = ctx.createGain(); mg.gain.value=0.88
     const lim = ctx.createDynamicsCompressor(); lim.threshold.value=-0.5; lim.ratio.value=20; lim.attack.value=0.001; lim.release.value=0.05
@@ -285,127 +354,279 @@ export default function AutomixPage() {
     mg.connect(lim); lim.connect(ctx.destination)
     vs.start(0); is.start(0)
 
-    setLoadingMsg('📦 Export WAV...')
+    setLoadingMsg('📦 Export WAV -14 LUFS...')
     const rendered = await ctx.startRendering()
     setMixedUrl(URL.createObjectURL(bufferToWav(rendered)))
     setStep('done')
   }
 
   function fmt(s: number) { return `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}` }
+
+  const retuneLabel = atSettings.retuneSpeed === 0 ? '🤖 T-Pain Instant' : atSettings.retuneSpeed < 20 ? '⚡ Fast' : atSettings.retuneSpeed < 50 ? '🎵 Medium' : '🌊 Slow Natural'
   const fname = `vizion-${keyInfo?.key||'A'}${keyInfo?.mode||'minor'}-${keyInfo?.bpm||140}bpm.wav`
-  const atLabel = autotuneStrength>=0.9?'🤖 T-Pain MAX':autotuneStrength>=0.7?'🎤 Fort':autotuneStrength>=0.4?'🎵 Moyen':'🌊 Naturel'
 
   return (
     <div className="min-h-screen px-4 md:px-8 py-8 md:py-12 overflow-x-hidden">
+      {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-600 to-pink-600 flex items-center justify-center flex-shrink-0"><Zap size={20} className="text-white" /></div>
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-600 to-pink-600 flex items-center justify-center flex-shrink-0">
+          <Zap size={20} className="text-white" />
+        </div>
         <div>
           <h1 className="font-display font-black text-2xl md:text-3xl text-white">AUTOMIX</h1>
-          <p className="text-white/40 text-xs">Pitch Corrector · Avalon · Valhalla · -14 LUFS</p>
+          <p className="text-white/40 text-xs">Auto-Tune EVO · Avalon · Valhalla · -14 LUFS</p>
         </div>
       </div>
 
-      {step==='upload' && (
+      {/* Progress */}
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+        {[
+          { id:'upload', label:'📁 Instru' },
+          { id:'record', label:'🎤 Enregistre' },
+          { id:'tune', label:'🎛️ Règle' },
+          { id:'mixing', label:'🎚️ Mix' },
+          { id:'done', label:'✅ Prêt' },
+        ].map(({ id, label }) => {
+          const steps = ['upload','analyzing','record','recording','tune','mixing','done']
+          const cur = steps.indexOf(step), idx = steps.indexOf(id)
+          return (
+            <span key={id} className={`px-3 py-1.5 rounded-xl text-xs font-medium flex-shrink-0 transition-all ${idx < cur ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : id === step || (id==='record' && step==='recording') ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50' : 'bg-white/5 text-white/25 border border-white/8'}`}>
+              {idx < cur ? '✓ ' : ''}{label}
+            </span>
+          )
+        })}
+      </div>
+
+      {/* UPLOAD */}
+      {step === 'upload' && (
         <div className="space-y-4">
           <div className="glass-card rounded-3xl border border-white/8 p-5">
             <p className="text-white/50 text-xs uppercase tracking-wider mb-3">Genre</p>
             <div className="flex flex-wrap gap-2">
-              {GENRES.map(g=>(
-                <button key={g} onClick={()=>setGenre(g)} className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${genre===g?'bg-violet-500/30 border border-violet-500/50 text-violet-300':'bg-white/5 border border-white/10 text-white/40'}`}>{g}</button>
+              {GENRES.map(g => (
+                <button key={g} onClick={() => setGenre(g)} className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${genre===g?'bg-violet-500/30 border border-violet-500/50 text-violet-300':'bg-white/5 border border-white/10 text-white/40'}`}>{g}</button>
               ))}
             </div>
           </div>
-          <div onClick={()=>instruRef.current?.click()} className="glass-card rounded-3xl border-2 border-dashed border-violet-500/30 p-10 text-center cursor-pointer hover:border-violet-500/60 transition-colors">
+          <div onClick={() => instruRef.current?.click()} className="glass-card rounded-3xl border-2 border-dashed border-violet-500/30 p-10 text-center cursor-pointer hover:border-violet-500/60 transition-colors">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600 to-pink-600 flex items-center justify-center mx-auto mb-4"><Upload size={28} className="text-white" /></div>
             <p className="text-white font-semibold text-lg mb-1">Upload ton instru</p>
-            <p className="text-white/40 text-sm">MP3, WAV — L'IA détecte la tonalité</p>
+            <p className="text-white/40 text-sm">MP3, WAV — L'IA détecte la tonalité automatiquement</p>
           </div>
-          <input ref={instruRef} type="file" accept="audio/*" onChange={e=>{const f=e.target.files?.[0];if(f)handleInstruUpload(f)}} className="hidden" />
+          <input ref={instruRef} type="file" accept="audio/*" onChange={e => { const f = e.target.files?.[0]; if(f) handleInstruUpload(f) }} className="hidden" />
         </div>
       )}
 
-      {step==='analyzing' && (
+      {/* ANALYZING */}
+      {step === 'analyzing' && (
         <div className="glass-card rounded-3xl border border-violet-500/20 p-10 text-center">
           <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-600 to-pink-600 flex items-center justify-center mx-auto mb-4 animate-spin-slow"><Music2 size={28} className="text-white" /></div>
-          <p className="text-white font-semibold text-lg mb-2">{loadingMsg}</p>
-          <p className="text-white/40 text-sm">BPM · Tonalité · Notes</p>
+          <p className="text-white font-semibold text-lg">{loadingMsg}</p>
         </div>
       )}
 
-      {(step==='ready'||step==='recording') && keyInfo && (
+      {/* RECORD */}
+      {(step === 'record' || step === 'recording') && keyInfo && (
         <div className="space-y-4">
+          {/* Key info */}
           <div className="glass-card rounded-3xl border border-violet-500/20 p-5">
-            <p className="text-white/40 text-xs uppercase tracking-wider mb-3">Tonalité détectée</p>
-            <div className="flex items-center gap-4 flex-wrap mb-3">
+            <div className="flex items-center gap-4 flex-wrap">
               <div className="text-center">
                 <p className="font-display font-black text-4xl text-white">{keyInfo.key}</p>
                 <span className="text-xs px-2 py-0.5 rounded-lg border text-violet-400 bg-violet-500/10 border-violet-500/20">{keyInfo.mode}</span>
               </div>
               <div className="flex-1">
                 <p className="text-white/60 text-sm">{keyInfo.bpm} BPM · {keyInfo.scale}</p>
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {keyInfo.autotune_recommended_notes?.map(n=><span key={n} className="text-xs bg-pink-500/20 border border-pink-500/30 text-pink-300 px-2 py-0.5 rounded-lg">{n}</span>)}
-                </div>
+                {instruFile && instruUrlRef.current && (
+                  <div className="mt-2">
+                    <audio ref={instruAudioRef} src={instruUrlRef.current} loop />
+                    <button onClick={toggleInstru} className="flex items-center gap-2 text-sm text-white/60 bg-white/5 border border-white/10 px-4 py-2 rounded-xl mt-1">
+                      {isPlaying ? <Pause size={14}/> : <Play size={14}/>}
+                      {isPlaying ? 'Pause instru' : 'Écouter instru'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-            {instruFile && instruUrlRef.current && (
-              <div>
-                <audio ref={instruAudioRef} src={instruUrlRef.current} loop />
-                <button onClick={toggleInstru} className="flex items-center gap-2 text-sm text-white/60 bg-white/5 border border-white/10 px-4 py-2 rounded-xl">
-                  {isPlaying?<Pause size={14}/>:<Play size={14}/>}{isPlaying?'Pause':'Écouter instru'}
-                </button>
-              </div>
-            )}
           </div>
 
-          <div className="glass-card rounded-3xl border border-pink-500/20 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-pink-400 font-medium text-sm">🎤 Pitch Corrector · {keyInfo.key} {keyInfo.mode}</p>
-              <span className="text-xs font-bold text-pink-400 bg-pink-500/20 px-3 py-1 rounded-xl border border-pink-500/30">{atLabel}</span>
-            </div>
-            <div className="flex gap-2 mb-4 flex-wrap">
-              {[{l:'Naturel',v:0.2},{l:'Pop',v:0.5},{l:'R&B',v:0.75},{l:'Trap',v:0.9},{l:'T-Pain 🤖',v:1.0}].map(({l,v})=>(
-                <button key={l} onClick={()=>setAutotuneStrength(v)} className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${Math.abs(autotuneStrength-v)<0.05?'bg-pink-500/30 border border-pink-500/50 text-pink-300':'bg-white/5 border border-white/10 text-white/40'}`}>{l}</button>
-              ))}
-            </div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-white/40 text-xs">Intensité</p>
-              <p className="text-pink-400 text-xs font-bold">{Math.round(autotuneStrength*100)}%</p>
-            </div>
-            <input type="range" min="0" max="1" step="0.05" value={autotuneStrength} onChange={e=>setAutotuneStrength(parseFloat(e.target.value))} className="w-full accent-pink-500" />
-            <div className="flex justify-between text-xs text-white/20 mt-1"><span>Humain</span><span>Robot T-Pain</span></div>
-          </div>
-
-          {step==='recording' && (
+          {/* VU Meter during recording */}
+          {step === 'recording' && (
             <div className="glass-card rounded-3xl border border-red-500/20 p-4">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-red-400 text-sm font-medium flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>REC {fmt(recordTime)}</p>
+                <p className="text-red-400 text-sm font-medium flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>REC {fmt(recordTime)}
+                </p>
                 <p className="text-white/40 text-xs">🎵 Instru en lecture</p>
               </div>
-              <div className="flex gap-1 items-end h-10">
-                {[...Array(20)].map((_,i)=><div key={i} className="flex-1 rounded-sm bg-gradient-to-t from-emerald-500 to-pink-500" style={{height:`${Math.max(4,vocalLevel*80)}px`}}/>)}
+              <div className="flex gap-1 items-end h-12">
+                {[...Array(24)].map((_,i) => (
+                  <div key={i} className="flex-1 rounded-sm bg-gradient-to-t from-emerald-500 to-pink-500 transition-all duration-75"
+                    style={{ height: `${Math.max(4, vocalLevel * 90 * (0.6 + Math.abs(Math.sin(Date.now()/200 + i)) * 0.4))}px` }} />
+                ))}
               </div>
             </div>
           )}
 
+          {/* Record button */}
           <div className="glass-card rounded-3xl border border-white/8 p-6 text-center">
-            <p className="text-white/40 text-xs uppercase tracking-wider mb-4">{step==='ready'?'Prêt — appuie pour commencer':'Enregistrement...'}</p>
-            <button onClick={step==='recording'?stopRecording:startRecording}
-              className={`w-24 h-24 rounded-full mx-auto flex items-center justify-center transition-all mb-3 ${step==='recording'?'bg-red-500 shadow-lg shadow-red-500/50 scale-110':'bg-gradient-to-br from-violet-600 to-pink-600 shadow-neon-purple hover:scale-105'}`}>
-              {step==='recording'?<MicOff size={32} className="text-white"/>:<Mic size={32} className="text-white"/>}
+            <p className="text-white/40 text-xs uppercase tracking-wider mb-4">
+              {step==='record' ? "Appuie → l'instru démarre" : 'Stop → régler l\'autotune'}
+            </p>
+            <button onClick={step==='recording' ? stopRecording : startRecording}
+              className={`w-24 h-24 rounded-full mx-auto flex items-center justify-center transition-all mb-3 ${step==='recording' ? 'bg-red-500 shadow-lg shadow-red-500/50 scale-110' : 'bg-gradient-to-br from-violet-600 to-pink-600 shadow-neon-purple hover:scale-105'}`}>
+              {step==='recording' ? <MicOff size={32} className="text-white"/> : <Mic size={32} className="text-white"/>}
             </button>
-            <p className="text-white/50 text-sm">{step==='recording'?'Stop → autotune + mix auto':"L'instru démarre quand tu enregistres"}</p>
-            {step==='ready' && <p className="text-violet-400 text-xs mt-2">Pitch Corrector → Avalon → EQ → Compression → Valhalla</p>}
+            <p className="text-white/40 text-xs">
+              {step==='recording' ? 'Stop → page réglages autotune' : 'Chante sur l\'instru'}
+            </p>
           </div>
         </div>
       )}
 
-      {step==='mixing' && (
+      {/* TUNE — Auto-Tune EVO style panel */}
+      {step === 'tune' && keyInfo && (
+        <div className="space-y-4">
+          {/* Écoute vocal brut */}
+          {recordedUrl && (
+            <div className="glass-card rounded-3xl border border-white/8 p-4">
+              <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Écoute ta voix brute</p>
+              <audio ref={vocalAudioRef} controls src={recordedUrl} className="w-full rounded-xl" />
+            </div>
+          )}
+
+          {/* Auto-Tune EVO Panel */}
+          <div className="glass-card rounded-3xl border border-pink-500/20 p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <Settings size={16} className="text-pink-400" />
+              <p className="text-pink-400 font-bold text-sm">AUTO-TUNE EVO — Pitch Correction</p>
+              <span className="ml-auto text-xs text-white/30">{keyInfo.key} {keyInfo.mode}</span>
+            </div>
+
+            {/* Retune Speed */}
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-white/60 text-xs font-medium uppercase tracking-wider">Retune Speed</p>
+                <span className="text-pink-400 text-xs font-bold">{retuneLabel}</span>
+              </div>
+              <input type="range" min="0" max="100" step="1" value={atSettings.retuneSpeed}
+                onChange={e => setAtSettings(p => ({ ...p, retuneSpeed: parseInt(e.target.value) }))}
+                className="w-full accent-pink-500" />
+              <div className="flex justify-between text-xs text-white/20 mt-1">
+                <span>Instant (T-Pain 🤖)</span><span>Slow (Naturel)</span>
+              </div>
+            </div>
+
+            {/* Humanize */}
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-white/60 text-xs font-medium uppercase tracking-wider">Humanize</p>
+                <span className="text-white/50 text-xs">{atSettings.humanize}</span>
+              </div>
+              <input type="range" min="0" max="100" step="1" value={atSettings.humanize}
+                onChange={e => setAtSettings(p => ({ ...p, humanize: parseInt(e.target.value) }))}
+                className="w-full accent-purple-500" />
+              <div className="flex justify-between text-xs text-white/20 mt-1">
+                <span>0 (Robot)</span><span>100 (Humain)</span>
+              </div>
+            </div>
+
+            {/* Pitch Amount */}
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-white/60 text-xs font-medium uppercase tracking-wider">Pitch Amount</p>
+                <span className="text-emerald-400 text-xs font-bold">{atSettings.pitchAmount}%</span>
+              </div>
+              <input type="range" min="0" max="100" step="1" value={atSettings.pitchAmount}
+                onChange={e => setAtSettings(p => ({ ...p, pitchAmount: parseInt(e.target.value) }))}
+                className="w-full accent-emerald-500" />
+              <div className="flex justify-between text-xs text-white/20 mt-1">
+                <span>0% (Bypass)</span><span>100% (Full)</span>
+              </div>
+            </div>
+
+            {/* Scale notes — comme Auto-Tune EVO */}
+            <div className="mb-5">
+              <p className="text-white/60 text-xs font-medium uppercase tracking-wider mb-3">Scale Notes — clique pour activer/désactiver</p>
+              <div className="grid grid-cols-6 gap-1.5">
+                {ALL_NOTES.map(note => {
+                  const active = atSettings.activeNotes.includes(note)
+                  const isScaleNote = keyInfo.autotune_recommended_notes?.includes(note)
+                  return (
+                    <button key={note} onClick={() => toggleNote(note)}
+                      className={`py-2 rounded-xl text-xs font-bold transition-all ${
+                        active
+                          ? isScaleNote
+                            ? 'bg-pink-500/40 border border-pink-500/60 text-pink-200'
+                            : 'bg-white/20 border border-white/30 text-white'
+                          : 'bg-white/3 border border-white/8 text-white/20'
+                      }`}>
+                      {note}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex gap-3 mt-2">
+                <button onClick={() => setAtSettings(p => ({ ...p, activeNotes: keyInfo.autotune_recommended_notes || [] }))}
+                  className="text-xs text-pink-400 hover:text-pink-300 transition-colors">← Gamme auto</button>
+                <button onClick={() => setAtSettings(p => ({ ...p, activeNotes: [...ALL_NOTES] }))}
+                  className="text-xs text-white/30 hover:text-white/60 transition-colors">Toutes les notes</button>
+                <button onClick={() => setAtSettings(p => ({ ...p, activeNotes: [] }))}
+                  className="text-xs text-white/20 hover:text-white/50 transition-colors">Aucune</button>
+              </div>
+            </div>
+
+            {/* Presets rapides */}
+            <div>
+              <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Presets</p>
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { label:'Naturel', speed:80, hum:60, pitch:50 },
+                  { label:'Pop', speed:30, hum:20, pitch:80 },
+                  { label:'R&B', speed:15, hum:10, pitch:90 },
+                  { label:'Trap', speed:5, hum:0, pitch:100 },
+                  { label:'T-Pain 🤖', speed:0, hum:0, pitch:100 },
+                ].map(({ label, speed, hum, pitch }) => (
+                  <button key={label}
+                    onClick={() => setAtSettings(p => ({ ...p, retuneSpeed: speed, humanize: hum, pitchAmount: pitch }))}
+                    className="px-3 py-1.5 rounded-xl text-xs font-medium bg-white/5 border border-white/10 text-white/50 hover:bg-pink-500/20 hover:text-pink-300 hover:border-pink-500/30 transition-all">
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Launch mix button */}
+          <button onClick={startMix}
+            className="w-full flex items-center gap-3 justify-center bg-gradient-to-r from-violet-600 via-pink-600 to-rose-500 text-white font-bold text-lg px-6 py-5 rounded-3xl hover:opacity-90 transition-opacity shadow-neon-purple">
+            <Zap size={22} />
+            LANCER LE MIX
+          </button>
+
+          <button onClick={() => setStep('record')}
+            className="w-full text-white/30 text-sm py-2 hover:text-white/60 transition-colors">
+            ← Réenregistrer
+          </button>
+        </div>
+      )}
+
+      {/* MIXING */}
+      {step === 'mixing' && (
         <div className="glass-card rounded-3xl border border-violet-500/20 p-8 text-center">
           <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-600 to-pink-600 flex items-center justify-center mx-auto mb-4 animate-spin-slow"><Zap size={28} className="text-white"/></div>
           <p className="text-white font-semibold text-lg mb-6">{loadingMsg}</p>
           <div className="space-y-2 text-left max-w-sm mx-auto">
-            {['🤖 Pitch Corrector (Logic Pro)','🎚️ Autocorrélation frame par frame',`🎵 Snap sur ${keyInfo?.key} ${keyInfo?.mode}`,'📻 Tube Pre-amp Avalon','🎛️ EQ Pultec + SSL','🔊 Compression 4:1','🏔️ Reverb Valhalla','⏱️ Delay calé BPM','📦 Mastering -14 LUFS'].map(l=>(
+            {[
+              `🤖 Autotune Speed: ${retuneLabel}`,
+              `🎵 ${atSettings.activeNotes.length} notes actives`,
+              `💊 Pitch Amount: ${atSettings.pitchAmount}%`,
+              '📻 Tube Pre-amp Avalon',
+              '🎛️ EQ Pultec + SSL',
+              '🔊 Compression 4:1',
+              '🏔️ Reverb Valhalla',
+              '📦 Mastering -14 LUFS',
+            ].map(l => (
               <div key={l} className="flex items-center gap-2 text-sm">
                 <div className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center bg-emerald-500"><Check size={10} className="text-white"/></div>
                 <span className="text-emerald-400">{l}</span>
@@ -415,19 +636,21 @@ export default function AutomixPage() {
         </div>
       )}
 
-      {step==='done' && mixedUrl && (
+      {/* DONE */}
+      {step === 'done' && mixedUrl && (
         <div className="space-y-4">
           <div className="glass-card rounded-3xl border border-emerald-500/20 p-6 text-center">
             <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center mx-auto mb-4"><Check size={28} className="text-emerald-400"/></div>
             <h2 className="font-display font-black text-2xl text-white mb-1">Mix Terminé ! 🎉</h2>
-            <p className="text-white/40 text-sm mb-2">{keyInfo?.key} {keyInfo?.mode} · {keyInfo?.bpm} BPM · {atLabel}</p>
-            <p className="text-emerald-400 text-xs mb-6">Pitch Corrector · Avalon · Valhalla · -14 LUFS Spotify</p>
+            <p className="text-white/40 text-sm mb-2">{keyInfo?.key} {keyInfo?.mode} · {keyInfo?.bpm} BPM · {retuneLabel}</p>
+            <p className="text-emerald-400 text-xs mb-6">Auto-Tune EVO · Avalon · Valhalla · -14 LUFS Spotify</p>
             <audio controls src={mixedUrl} className="w-full rounded-2xl mb-4"/>
-            <button onClick={()=>downloadOrShare(mixedUrl,fname)} className="flex items-center gap-2 justify-center bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold px-6 py-4 rounded-2xl hover:opacity-90 transition-opacity w-full">
+            <button onClick={() => downloadOrShare(mixedUrl, fname)}
+              className="flex items-center gap-2 justify-center bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold px-6 py-4 rounded-2xl hover:opacity-90 w-full">
               <Download size={20}/>Télécharger / Partager WAV
             </button>
           </div>
-          <button onClick={()=>{setStep('upload');setInstruFile(null);setKeyInfo(null);setRecordedBlob(null);setMixedUrl(null);setRecordTime(0)}}
+          <button onClick={() => { setStep('upload'); setInstruFile(null); setKeyInfo(null); setRecordedBlob(null); setRecordedUrl(null); setMixedUrl(null); setRecordTime(0) }}
             className="w-full flex items-center gap-2 justify-center bg-white/5 border border-white/10 text-white/60 font-medium px-6 py-3 rounded-2xl">
             <RefreshCw size={16}/>Nouveau mix
           </button>
