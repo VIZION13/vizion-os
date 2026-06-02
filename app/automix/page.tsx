@@ -174,37 +174,27 @@ export default function AutomixPage() {
     return new Blob([ab], { type: 'audio/wav' })
   }
 async function downloadOrShare(url: string, name: string) {
-  try {
-    // Upload to Supabase to get a real URL Safari can download
-    const response = await fetch(url)
-    const blob = await response.blob()
-    const file = new File([blob], name, { type: 'audio/wav' })
+  const response = await fetch(url)
+  const blob = await response.blob()
+  const file = new File([blob], name, { type: 'audio/wav' })
 
-    const fd = new FormData()
-    fd.append('file', file)
-    fd.append('filename', name)
+  // iOS Safari — utilise Share Sheet natif
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    await navigator.share({
+      files: [file],
+      title: 'Mon mix VIZION',
+    })
+    return
+  }
 
-    const res = await fetch('/api/upload-mix', { method: 'POST', body: fd })
-    const data = await res.json()
-
-    if (data.url) {
-      // iOS — open real URL in new tab → Safari propose de télécharger
-      window.open(data.url, '_blank')
-    }
-  } catch {
-    // Fallback share
-    try {
-      const response = await fetch(url)
-      const blob = await response.blob()
-      const file = new File([blob], name, { type: 'audio/wav' })
-      if (navigator.share) {
-        await navigator.share({ files: [file], title: 'VIZION AUTOMIX' })
-      } else {
-        window.open(url, '_blank')
-      }
-    } catch {
-      window.open(url, '_blank')
-    }
+  // Desktop fallback
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
   }
 }
   async function processAndMix() {
