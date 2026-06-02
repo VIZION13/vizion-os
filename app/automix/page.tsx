@@ -142,6 +142,21 @@ export default function AutomixPage() {
         data[i] = early + tail
       }
     }
+  async function downloadOrShare(url: string, filename: string) {
+  try {
+    if (navigator.share) {
+      const response = await fetch(url)
+      const blob = await response.blob()
+      const file = new File([blob], filename, { type: 'audio/wav' })
+      await navigator.share({ files: [file], title: 'VIZION AUTOMIX' })
+    } else {
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+    }
+  } catch {
+    window.open(url, '_blank')
+  }
+}
     return buf
   }
 
@@ -444,10 +459,12 @@ export default function AutomixPage() {
             <p className="text-white/40 text-sm mb-2">{keyInfo?.key} {keyInfo?.mode} · {keyInfo?.bpm} BPM</p>
             <p className="text-emerald-400 text-xs mb-6">Avalon · Valhalla · -14 LUFS Spotify</p>
             <audio controls src={mixedUrl} className="w-full rounded-2xl mb-4" />
-            <a href={mixedUrl} download={`vizion-mix-${keyInfo?.key}${keyInfo?.mode}-${keyInfo?.bpm}bpm.wav`}
-              className="flex items-center gap-2 justify-center bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold px-6 py-4 rounded-2xl hover:opacity-90 transition-opacity w-full">
-              <Download size={20} />Télécharger WAV
-            </a>
+            <button
+  onClick={() => downloadOrShare(mixedUrl, `vizion-mix-${keyInfo?.key}${keyInfo?.mode}-${keyInfo?.bpm}bpm.wav`)}
+  className="flex items-center gap-2 justify-center bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold px-6 py-4 rounded-2xl hover:opacity-90 transition-opacity w-full">
+  <Download size={20} />
+  Télécharger / Partager WAV
+</button>
           </div>
           <button onClick={() => { setStep('upload'); setInstruFile(null); setKeyInfo(null); setRecordedBlob(null); setMixedUrl(null); setRecordTime(0) }}
             className="w-full flex items-center gap-2 justify-center bg-white/5 border border-white/10 text-white/60 font-medium px-6 py-3 rounded-2xl hover:bg-white/10 transition-colors">
