@@ -14,7 +14,7 @@ const nav = [
   { href: '/admin',    icon: ClipboardList, label: 'Admin',     color: 'from-emerald-600 to-teal-500' },
   { href: '/automix', icon: Zap, label: 'AutoMix', color: 'from-violet-600 to-pink-600' },
   { href: '/memory',   icon: Brain,         label: 'Memory',
-  { href: '/automix', icon: Zap, label: 'AutoMix', color: 'from-violet-600 to-pink-600' },    color: 'from-fuchsia-600 to-purple-600' },
+  { href: '/automix', icon: Zap, label: 'AutoMix', color: 'from-violet-600 to-pink-600' },
   { href: '/settings', icon: Settings,      label: 'Settings',  color: 'from-slate-600 to-slate-500' },
 ]
 
