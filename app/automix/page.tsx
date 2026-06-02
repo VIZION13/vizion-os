@@ -69,9 +69,9 @@ function detectPitchACF(frame: Float32Array, sr: number): number {
   return sr / bestP
 }
 
-function pitchShiftFrame(frame: Float32Array, ratio: number): Float32Array {
+function pitchShiftFrame(frame: Float32Array<ArrayBuffer>, ratio: number): Float32Array<ArrayBuffer> {
   if (Math.abs(ratio - 1.0) < 0.001) return frame
-  const out = new Float32Array(frame.length)
+  const out: Float32Array<ArrayBuffer> = new Float32Array(frame.length) as Float32Array<ArrayBuffer>
   for (let i = 0; i < frame.length; i++) {
     const src = i * ratio
     const i0 = Math.floor(src), i1 = Math.min(i0 + 1, frame.length - 1)
@@ -95,7 +95,7 @@ function applyHardAutotune(ctx: OfflineAudioContext, buffer: AudioBuffer, scaleK
     while (pos + frameSize <= buffer.length) {
       const frame = input.slice(pos, pos + frameSize)
       const freq = detectPitchACF(frame, sr)
-      let shifted = frame
+      let shifted: Float32Array<ArrayBuffer> = frame as Float32Array<ArrayBuffer>
       if (freq > 50 && freq < 1200) {
         const midi = freqToMidi(freq)
         const snapped = snapToScale(midi, scaleKey)
