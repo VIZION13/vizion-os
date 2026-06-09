@@ -26,19 +26,52 @@ export async function POST(req: NextRequest) {
     const id = formData.get('id') as string || null
     const file = formData.get('photo') as File | null
 
-    // Stocke la photo en base64 dans la colonne reference_url
     let referenceUrl = formData.get('reference_url') as string || ''
+    let base64Preview = formData.get('base64_preview') as string || ''
 
     if (file && file.size > 0) {
       const buffer = Buffer.from(await file.arrayBuffer())
+      const filename = `${Date.now()}-${name.replace(/\s+/g, '-').toLowerCase()}.jpg`
+
+      // 1. Upload to Supabase Storage pour avoir une vraie URL publique
+      const { error: uploadError } = await supabase.storage
+        .from('artist-photos')
+        .upload(filename, buffer, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        })
+
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage
+          .from('artist-photos')
+          .getPublicUrl(filename)
+        referenceUrl = urlData.publicUrl
+      }
+
+      // 2. Stocke aussi un base64 redimensionné pour l'aperçu (max 200px)
       const base64 = buffer.toString('base64')
-      const mimeType = file.type || 'image/jpeg'
-      referenceUrl = `data:${mimeType};base64,${base64}`
+      base64Preview = `data:image/jpeg;base64,${base64}`
+
+      // Si upload Storage échoue, utilise base64 comme fallback pour l'aperçu
+      if (!referenceUrl) {
+        referenceUrl = base64Preview
+      }
+    }
+
+    const profileData = {
+      name,
+      style,
+      genre,
+      reference_url: referenceUrl,
+      base64_preview: base64Preview.slice(0, 500000) || null, // max 500kb
     }
 
     if (id) {
       const updateData: any = { name, style, genre }
-      if (referenceUrl) updateData.reference_url = referenceUrl
+      if (referenceUrl) {
+        updateData.reference_url = referenceUrl
+        if (base64Preview) updateData.base64_preview = base64Preview.slice(0, 500000)
+      }
       const { data, error } = await supabase
         .from('artist_profiles')
         .update(updateData)
@@ -50,7 +83,7 @@ export async function POST(req: NextRequest) {
     } else {
       const { data, error } = await supabase
         .from('artist_profiles')
-        .insert({ name, style, genre, reference_url: referenceUrl })
+        .insert(profileData)
         .select()
         .single()
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
