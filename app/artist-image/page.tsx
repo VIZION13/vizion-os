@@ -84,6 +84,7 @@ export default function ArtistImagePage() {
   const [aspectRatio, setAspectRatio] = useState('1:1')
   const [addCinematic, setAddCinematic] = useState(true)
   const [enhancing, setEnhancing] = useState(false)
+  const [faceModel, setFaceModel] = useState<'instantid' | 'flux-pulid' | 'ipadapter'>('flux-pulid')
 
   const photoRef = useRef<HTMLInputElement>(null)
 
@@ -189,6 +190,7 @@ Réponds UNIQUEMENT avec le prompt amélioré en anglais, max 150 mots. Focus su
           colorGrade,
           aspectRatio,
           addCinematic,
+          model: faceModel,
         })
       })
       const data = await res.json()
@@ -380,6 +382,24 @@ Réponds UNIQUEMENT avec le prompt amélioré en anglais, max 150 mots. Focus su
               <p className="text-violet-400 font-bold text-sm">GÉNÉRER AVEC CE VISAGE</p>
             </div>
 
+            {/* Model selector */}
+            <div className="mb-4">
+              <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Modèle de cohérence</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'flux-pulid', label: 'PuLID FLUX', desc: 'Meilleur · FLUX + visage', color: 'text-fuchsia-400' },
+                  { id: 'instantid', label: 'InstantID', desc: 'Très fidèle', color: 'text-violet-400' },
+                  { id: 'ipadapter', label: 'IP-Adapter', desc: 'Style + visage', color: 'text-blue-400' },
+                ].map(m => (
+                  <button key={m.id} onClick={() => setFaceModel(m.id as any)}
+                    className={`p-2.5 rounded-2xl border text-center transition-all ${faceModel === m.id ? 'bg-fuchsia-500/20 border-fuchsia-500/40' : 'bg-white/3 border-white/8 hover:bg-white/8'}`}>
+                    <p className={`text-xs font-bold ${faceModel === m.id ? m.color : 'text-white/50'}`}>{m.label}</p>
+                    <p className="text-[10px] text-white/25 mt-0.5">{m.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Cinematic toggle */}
             <div className="flex items-center justify-between mb-4 bg-white/3 rounded-2xl p-3 border border-white/8">
               <div>
@@ -447,7 +467,7 @@ Réponds UNIQUEMENT avec le prompt amélioré en anglais, max 150 mots. Focus su
             <button onClick={generate} disabled={loading || !prompt}
               className="w-full flex items-center gap-2 justify-center bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white font-bold px-6 py-4 rounded-2xl disabled:opacity-40 hover:opacity-90 transition-opacity">
               <Wand2 size={18} />
-              {loading ? 'Génération InstantID (~40s)...' : `Générer avec le visage de ${selectedProfile.name}`}
+              {loading ? `Génération ${faceModel === 'flux-pulid' ? 'PuLID FLUX' : faceModel === 'instantid' ? 'InstantID' : 'IP-Adapter'} (~40s)...` : `Générer avec le visage de ${selectedProfile.name}`}
             </button>
 
             {loading && (
