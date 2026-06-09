@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
         n: 1,
         size,
         quality: 'high',
-        output_format: 'url',
+        output_format: "png",
       })
     })
 
