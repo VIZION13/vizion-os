@@ -27,25 +27,47 @@ async function pollReplicate(id: string): Promise<string> {
   throw new Error('Timeout')
 }
 
-// Upload base64 vers Supabase Storage → retourne URL publique
-async function uploadToSupabase(base64DataUrl: string, filename: string): Promise<string> {
+// Télécharge une image depuis une URL et la re-upload vers Replicate Files
+async function urlToReplicateUrl(imageUrl: string): Promise<string> {
+  // Télécharge l'image
+  const response = await fetch(imageUrl)
+  if (!response.ok) throw new Error(`Cannot fetch image: ${imageUrl}`)
+  const arrayBuffer = await response.arrayBuffer()
+  const buffer = Buffer.from(arrayBuffer)
+  const contentType = response.headers.get('content-type') || 'image/jpeg'
+
+  // Upload vers Replicate Files API
+  const uploadRes = await fetch('https://api.replicate.com/v1/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${REPLICATE_TOKEN}`,
+      'Content-Type': contentType,
+    },
+    body: buffer,
+  })
+  const uploadData = await uploadRes.json()
+  if (!uploadRes.ok) throw new Error(`Replicate upload: ${uploadData.detail || JSON.stringify(uploadData)}`)
+  return uploadData.urls?.get || uploadData.url
+}
+
+// Convertit base64 vers Replicate Files
+async function base64ToReplicateUrl(base64DataUrl: string): Promise<string> {
   const matches = base64DataUrl.match(/^data:([^;]+);base64,(.+)$/)
-  if (!matches) throw new Error('Invalid image format')
+  if (!matches) throw new Error('Invalid base64')
   const buffer = Buffer.from(matches[2], 'base64')
-  const ext = matches[1].includes('png') ? 'png' : 'jpg'
-  const path = `temp/${filename}.${ext}`
+  const contentType = matches[1]
 
-  const { error } = await supabase.storage
-    .from('artist-photos')
-    .upload(path, buffer, {
-      contentType: matches[1],
-      upsert: true,
-    })
-
-  if (error) throw new Error(`Supabase upload: ${error.message}`)
-
-  const { data } = supabase.storage.from('artist-photos').getPublicUrl(path)
-  return data.publicUrl
+  const uploadRes = await fetch('https://api.replicate.com/v1/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${REPLICATE_TOKEN}`,
+      'Content-Type': contentType,
+    },
+    body: buffer,
+  })
+  const uploadData = await uploadRes.json()
+  if (!uploadRes.ok) throw new Error(`Replicate upload: ${uploadData.detail || JSON.stringify(uploadData)}`)
+  return uploadData.urls?.get || uploadData.url
 }
 
 export async function POST(req: NextRequest) {
@@ -102,7 +124,10 @@ export async function POST(req: NextRequest) {
     if (!generatedImage) throw new Error('OpenAI: pas d\'image générée')
 
     const b64 = generatedImage.b64_json
-    const generatedDataUrl = b64 ? `data:image/png;base64,${b64}` : generatedImage.url
+    const generatedDataUrl = b64
+      ? `data:image/png;base64,${b64}`
+      : generatedImage.url
+
     if (!generatedDataUrl) throw new Error('OpenAI: image invalide')
 
     // Si pas de FaceFusion → retourne directement
@@ -117,19 +142,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ url: generatedDataUrl, openai_url: generatedDataUrl })
     }
 
-    // ── ÉTAPE 2 : Upload vers Supabase pour avoir des URLs publiques ──
-    const timestamp = Date.now()
+    // ── ÉTAPE 2 : Convertit les images en URLs Replicate ──
+    // Image OpenAI → Replicate URL
+    const templateReplicateUrl = generatedDataUrl.startsWith('data:')
+      ? await base64ToReplicateUrl(generatedDataUrl)
+      : await urlToReplicateUrl(generatedDataUrl)
 
-    // Upload image générée par OpenAI
-    const templatePublicUrl = await uploadToSupabase(generatedDataUrl, `template-${timestamp}`)
+    // Photo artiste → Replicate URL
+    const faceReplicateUrl = referenceUrl.startsWith('data:')
+      ? await base64ToReplicateUrl(referenceUrl)
+      : await urlToReplicateUrl(referenceUrl)
 
-    // Upload photo artiste si c'est un base64
-    let facePublicUrl = referenceUrl
-    if (referenceUrl.startsWith('data:')) {
-      facePublicUrl = await uploadToSupabase(referenceUrl, `face-${timestamp}`)
-    }
-
-    // ── ÉTAPE 3 : FaceFusion avec URLs publiques ──
+    // ── ÉTAPE 3 : FaceFusion ──
     const fuseRes = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -139,8 +163,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         version: '52edbb2b42beb4e19242f0c9ad5717211a96c63ff1f0b0320caa518b2745f4f7',
         input: {
-          user_image: facePublicUrl,
-          template_image: templatePublicUrl,
+          user_image: faceReplicateUrl,
+          template_image: templateReplicateUrl,
         }
       })
     })
