@@ -35,7 +35,7 @@ async function uploadToReplicate(buffer: Buffer, mimeType: string): Promise<stri
       'Content-Type': mimeType,
       'Content-Length': String(buffer.length),
     },
-    body: buffer,
+    body: new Uint8Array(buffer),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(`Replicate upload: ${data.detail || JSON.stringify(data)}`)
