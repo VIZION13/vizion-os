@@ -2,10 +2,10 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Settings, Zap } from 'lucide-react'
+import { Home, Wand2, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Settings, Zap } from 'lucide-react'
 
 const nav = [
-  { href: '/',          icon: Home,          label: 'Home',     color: 'from-violet-600 to-indigo-600' },
+  { href: '/image', icon: Wand2, label: 'Image', color: 'from-fuchsia-600 to-violet-600' },
   { href: '/clip',      icon: Clapperboard,  label: 'Clip',     color: 'from-violet-600 to-purple-500' },
   { href: '/music',     icon: Music2,         label: 'Music',    color: 'from-pink-600 to-rose-500' },
   { href: '/artists',   icon: Users,          label: 'Artists',  color: 'from-sky-600 to-blue-500' },

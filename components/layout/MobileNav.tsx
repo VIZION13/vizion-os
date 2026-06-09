@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Settings, Zap } from 'lucide-react'
+import { Home, Wand2, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Settings, Zap } from 'lucide-react'
 
 const nav = [
   { href: '/',         icon: Home,         label: 'Home',     color: 'from-violet-600 to-indigo-600' },
