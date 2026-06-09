@@ -76,10 +76,10 @@ export async function POST(req: NextRequest) {
 
     const sizeMap: Record<string, string> = {
       '1:1': '1024x1024',
-      '16:9': '1792x1024',
-      '9:16': '1024x1792',
-      '4:5': '1024x1280',
-      '21:9': '1792x768',
+      '16:9': '1536x1024',
+      '9:16': '1024x1536',
+      '4:5': '1024x1536',
+      '21:9': '1536x1024',
     }
     const size = sizeMap[aspectRatio] || '1024x1024'
 
