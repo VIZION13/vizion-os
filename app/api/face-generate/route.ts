@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import crypto from 'crypto'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
@@ -28,21 +27,30 @@ async function pollReplicate(id: string): Promise<string> {
   throw new Error('Timeout')
 }
 
-async function toReplicateUrl(base64DataUrl: string): Promise<string> {
-  const matches = base64DataUrl.match(/^data:([^;]+);base64,(.+)$/)
-  if (!matches) throw new Error('Invalid image format')
-  const buffer = Buffer.from(matches[2], 'base64')
+async function uploadToReplicate(buffer: Buffer, mimeType: string): Promise<string> {
   const res = await fetch('https://api.replicate.com/v1/files', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${REPLICATE_TOKEN}`,
-      'Content-Type': matches[1],
+      'Content-Type': mimeType,
+      'Content-Length': String(buffer.length),
     },
     body: buffer,
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(`Replicate file upload: ${data.detail || JSON.stringify(data)}`)
+  if (!res.ok) throw new Error(`Replicate upload: ${data.detail || JSON.stringify(data)}`)
   return data.urls?.get || data.url
+}
+
+async function toReplicateUrl(input: string): Promise<string> {
+  // Already a public URL
+  if (input.startsWith('http')) return input
+
+  // base64 data URL
+  const matches = input.match(/^data:([^;]+);base64,(.+)$/)
+  if (!matches) throw new Error('Invalid image format')
+  const buffer = Buffer.from(matches[2], 'base64')
+  return uploadToReplicate(buffer, matches[1])
 }
 
 export async function POST(req: NextRequest) {
@@ -62,17 +70,16 @@ export async function POST(req: NextRequest) {
 
     if (!prompt) return NextResponse.json({ error: 'Prompt requis' }, { status: 400 })
 
-    // Build final prompt
     const parts = [prompt, camera, lens, lighting, colorGrade].filter(Boolean)
     if (addCinematic !== false) parts.push(CINEMATIC)
     const finalPrompt = parts.join(', ')
 
-    // Map aspect ratio to OpenAI size
     const sizeMap: Record<string, string> = {
       '1:1': '1024x1024',
       '16:9': '1792x1024',
       '9:16': '1024x1792',
       '4:5': '1024x1280',
+      '21:9': '1792x768',
     }
     const size = sizeMap[aspectRatio] || '1024x1024'
 
@@ -89,42 +96,44 @@ export async function POST(req: NextRequest) {
         n: 1,
         size,
         quality: 'high',
-        output_format: "png",
+        output_format: 'png',
       })
     })
 
     const openaiData = await openaiRes.json()
     if (!openaiRes.ok) throw new Error(`OpenAI: ${openaiData.error?.message || JSON.stringify(openaiData)}`)
 
-    // Get image URL or base64
     const generatedImage = openaiData.data?.[0]
-    const generatedUrl = generatedImage?.url || (generatedImage?.b64_json ? `data:image/png;base64,${generatedImage.b64_json}` : null)
+    if (!generatedImage) throw new Error('OpenAI: pas d\'image générée')
 
-    if (!generatedUrl) throw new Error('OpenAI: pas d\'image générée')
+    // Récupère le base64 ou l'URL
+    let generatedBase64: string | null = generatedImage.b64_json || null
+    let generatedUrl: string | null = generatedImage.url || null
 
-    // Si pas de photo de référence ou skipFaceFusion → retourne l'image OpenAI directement
+    // Si base64, crée une data URL
+    const generatedDataUrl = generatedBase64
+      ? `data:image/png;base64,${generatedBase64}`
+      : generatedUrl
+
+    if (!generatedDataUrl) throw new Error('OpenAI: image invalide')
+
+    // Si pas de face fusion → retourne directement
     if (!referenceUrl || skipFaceFusion) {
       if (artistId) {
         await supabase.from('artist_generations').insert({
           artist_id: artistId,
-          image_url: generatedUrl,
+          image_url: generatedDataUrl,
           prompt: finalPrompt,
         })
       }
-      return NextResponse.json({ url: generatedUrl, openai_url: generatedUrl })
+      return NextResponse.json({ url: generatedDataUrl, openai_url: generatedDataUrl })
     }
 
-    // ── ÉTAPE 2 : FaceFusion ──
-    let faceImageUrl = referenceUrl
-    if (referenceUrl.startsWith('data:')) {
-      faceImageUrl = await toReplicateUrl(referenceUrl)
-    }
+    // ── ÉTAPE 2 : Upload les deux images vers Replicate Files ──
+    const faceUrl = await toReplicateUrl(referenceUrl)
+    const templateUrl = await toReplicateUrl(generatedDataUrl)
 
-    let templateUrl = generatedUrl
-    if (generatedUrl.startsWith('data:')) {
-      templateUrl = await toReplicateUrl(generatedUrl)
-    }
-
+    // ── ÉTAPE 3 : FaceFusion ──
     const fuseRes = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -134,7 +143,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         version: '52edbb2b42beb4e19242f0c9ad5717211a96c63ff1f0b0320caa518b2745f4f7',
         input: {
-          user_image: faceImageUrl,
+          user_image: faceUrl,
           template_image: templateUrl,
         }
       })
@@ -153,10 +162,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json({
-      url: finalUrl,
-      openai_url: generatedUrl,
-    })
+    return NextResponse.json({ url: finalUrl, openai_url: generatedDataUrl })
 
   } catch (err: any) {
     console.error('face-generate error:', err.message)
