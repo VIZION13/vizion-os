@@ -36,7 +36,7 @@ async function uploadToSupabase(base64DataUrl: string, filename: string): Promis
   const path = `temp/${filename}.${ext}`
 
   const { error } = await supabase.storage
-    .from('mj-gallery')
+    .from('artist-photos')
     .upload(path, buffer, {
       contentType: matches[1],
       upsert: true,
@@ -44,7 +44,7 @@ async function uploadToSupabase(base64DataUrl: string, filename: string): Promis
 
   if (error) throw new Error(`Supabase upload: ${error.message}`)
 
-  const { data } = supabase.storage.from('mj-gallery').getPublicUrl(path)
+  const { data } = supabase.storage.from('artist-photos').getPublicUrl(path)
   return data.publicUrl
 }
 
