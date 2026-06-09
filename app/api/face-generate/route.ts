@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        version: 'cff669d2700f848c8544e2693cb39a6d7c1f97a80e02d8a2d20b50e5a7272e4c',
+        version: '52edbb2b42beb4e19242f0c9ad5717211a96c63ff1f0b0320caa518b2745f4f7',
         input: {
           user_image: faceImageUrl,       // visage de l'artiste
           template_image: generatedImageUrl, // image FLUX générée
