@@ -430,7 +430,7 @@ Réponds UNIQUEMENT avec le prompt amélioré en français et anglais mélangés
                   {ref.label}
                 </p>
                 <input
-                  ref={el => refRefs.current[idx] = el}
+                  ref={el => { refRefs.current[idx] = el }}
                   type="file" accept="image/*"
                   onChange={e => handleRefImage(idx, e)}
                   className="hidden" />
