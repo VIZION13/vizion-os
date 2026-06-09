@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 export const runtime = 'nodejs'
-export const maxDuration = 120
+export const maxDuration = 180
 
 const REPLICATE_TOKEN = process.env.REPLICATE_API_TOKEN!
 const supabase = createClient(
@@ -10,19 +10,19 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const CINEMATIC = 'ARRI Alexa cinema, Super 35mm, anamorphic lens, RAW, cinematic color grade, photorealistic, 8K, shallow depth of field'
+const CINEMATIC = 'ARRI Alexa cinema, Super 35mm sensor, ARRI Signature Prime lens, RAW footage, cinematic color grade, photorealistic, 8K ultra detailed, shallow depth of field, professional photography, film grain'
 
-async function pollPrediction(id: string): Promise<string> {
-  for (let i = 0; i < 60; i++) {
+async function pollPrediction(id: string, maxWait = 60): Promise<string> {
+  for (let i = 0; i < maxWait; i++) {
     await new Promise(r => setTimeout(r, 3000))
     const poll = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
       headers: { 'Authorization': `Bearer ${REPLICATE_TOKEN}` }
     })
     const data = await poll.json()
     if (data.status === 'succeeded') return Array.isArray(data.output) ? data.output[0] : data.output
-    if (data.status === 'failed') throw new Error(data.error || 'Failed')
+    if (data.status === 'failed') throw new Error(data.error || 'Prediction failed')
   }
-  throw new Error('Timeout')
+  throw new Error('Timeout after 3 minutes')
 }
 
 async function toReplicateUrl(base64DataUrl: string): Promise<string> {
@@ -38,111 +38,101 @@ async function toReplicateUrl(base64DataUrl: string): Promise<string> {
     body: buffer,
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(`File upload: ${data.detail || JSON.stringify(data)}`)
+  if (!res.ok) throw new Error(`File upload failed: ${data.detail || JSON.stringify(data)}`)
   return data.urls?.get || data.url
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { artistId, referenceUrl, prompt, camera, lens, lighting, colorGrade, aspectRatio, addCinematic, model } = await req.json()
+    const {
+      artistId,
+      referenceUrl,
+      prompt,
+      camera,
+      lens,
+      lighting,
+      colorGrade,
+      aspectRatio,
+      addCinematic,
+    } = await req.json()
 
-    if (!referenceUrl) return NextResponse.json({ error: 'Photo de référence manquante' }, { status: 400 })
-
-    let imageUrl = referenceUrl
-    if (referenceUrl.startsWith('data:')) {
-      imageUrl = await toReplicateUrl(referenceUrl)
+    if (!referenceUrl) {
+      return NextResponse.json({ error: 'Photo de référence manquante' }, { status: 400 })
     }
 
+    // Convertit base64 → URL Replicate
+    let faceImageUrl = referenceUrl
+    if (referenceUrl.startsWith('data:')) {
+      faceImageUrl = await toReplicateUrl(referenceUrl)
+    }
+
+    // Build cinematic prompt
     const parts = [prompt, camera, lens, lighting, colorGrade].filter(Boolean)
     if (addCinematic !== false) parts.push(CINEMATIC)
     const finalPrompt = parts.join(', ')
 
-    const w = aspectRatio === '16:9' ? 1280 : aspectRatio === '9:16' ? 768 : 1024
-    const h = aspectRatio === '16:9' ? 720 : aspectRatio === '9:16' ? 1280 : 1024
+    const w = aspectRatio === '16:9' ? 1344 : aspectRatio === '9:16' ? 768 : 1024
+    const h = aspectRatio === '16:9' ? 768 : aspectRatio === '9:16' ? 1344 : 1024
 
-    let predId: string
-
-    if (model === 'flux-pulid') {
-      // PuLID FLUX — version stable
-      const res = await fetch('https://api.replicate.com/v1/predictions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${REPLICATE_TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          version: 'f4b4e3b2b9d1c7e8a5f6d2c3e4b5a6d7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3',
-          input: {
-            main_face_image: imageUrl,
-            prompt: finalPrompt,
-            negative_prompt: 'blurry, low quality, ugly, distorted face, watermark',
-            num_steps: 20,
-            guidance: 4.0,
-            id_weight: 1.0,
-            width: w, height: h,
-            output_format: 'jpg',
-          }
-        })
+    // ── ÉTAPE 1 : FLUX Pro Ultra → image haute qualité ──
+    const fluxRes = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro-ultra/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${REPLICATE_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: {
+          prompt: finalPrompt,
+          aspect_ratio: aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : aspectRatio === '4:5' ? '4:5' : '1:1',
+          output_format: 'jpg',
+          output_quality: 100,
+          safety_tolerance: 5,
+          raw: true,
+        }
       })
-      const pred = await res.json()
-      if (!res.ok) throw new Error(`PuLID: ${pred.detail || JSON.stringify(pred)}`)
-      predId = pred.id
+    })
 
-    } else if (model === 'ipadapter') {
-      // FLUX Dev img2img
-      const res = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-dev/predictions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${REPLICATE_TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: {
-            prompt: finalPrompt,
-            image: imageUrl,
-            prompt_strength: 0.75,
-            num_inference_steps: 28,
-            guidance: 3.5,
-            width: w, height: h,
-            output_format: 'jpg',
-            output_quality: 95,
-          }
-        })
+    const fluxPred = await fluxRes.json()
+    if (!fluxRes.ok) throw new Error(`FLUX: ${fluxPred.detail || JSON.stringify(fluxPred)}`)
+
+    const generatedImageUrl = await pollPrediction(fluxPred.id, 40)
+
+    // ── ÉTAPE 2 : FaceFusion → swap le visage de l'artiste ──
+    const fuseRes = await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${REPLICATE_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        version: 'cff669d2700f848c8544e2693cb39a6d7c1f97a80e02d8a2d20b50e5a7272e4c',
+        input: {
+          user_image: faceImageUrl,       // visage de l'artiste
+          template_image: generatedImageUrl, // image FLUX générée
+        }
       })
-      const pred = await res.json()
-      if (!res.ok) throw new Error(`FLUX Dev: ${pred.detail || JSON.stringify(pred)}`)
-      predId = pred.id
+    })
 
-    } else {
-      // InstantID — version hash stable
-      const res = await fetch('https://api.replicate.com/v1/predictions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${REPLICATE_TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          version: 'f1ca369da43885a347690a98f6b710afbf5f167cb9bf13bd5af512ba4a9f7b63',
-          input: {
-            image: imageUrl,
-            prompt: finalPrompt,
-            negative_prompt: 'blurry, low quality, distorted face, ugly, watermark',
-            ip_adapter_scale: 0.8,
-            controlnet_conditioning_scale: 0.8,
-            num_inference_steps: 30,
-            guidance_scale: 5.0,
-            width: w,
-            height: h,
-          }
-        })
-      })
-      const pred = await res.json()
-      if (!res.ok) throw new Error(`InstantID: ${pred.detail || JSON.stringify(pred)}`)
-      predId = pred.id
-    }
+    const fusePred = await fuseRes.json()
+    if (!fuseRes.ok) throw new Error(`FaceFusion: ${fusePred.detail || JSON.stringify(fusePred)}`)
 
-    const url = await pollPrediction(predId)
+    const finalImageUrl = await pollPrediction(fusePred.id, 40)
 
+    // Sauvegarde
     if (artistId) {
       await supabase.from('artist_generations').insert({
         artist_id: artistId,
-        image_url: url,
+        image_url: finalImageUrl,
         prompt: finalPrompt,
       })
     }
 
-    return NextResponse.json({ url })
+    return NextResponse.json({
+      url: finalImageUrl,
+      flux_url: generatedImageUrl, // image avant swap (debug)
+    })
+
   } catch (err: any) {
     console.error('face-generate error:', err.message)
     return NextResponse.json({ error: err.message }, { status: 500 })
