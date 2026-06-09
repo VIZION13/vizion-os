@@ -1,28 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import crypto from 'crypto'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
 
+const OPENAI_KEY = process.env.OPENAI_API_KEY!
 const REPLICATE_TOKEN = process.env.REPLICATE_API_TOKEN!
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const CINEMATIC = 'ARRI Alexa cinema, Super 35mm sensor, ARRI Signature Prime lens, RAW footage, cinematic color grade, photorealistic, 8K ultra detailed, shallow depth of field, professional photography, film grain'
+const CINEMATIC = 'shot on ARRI Alexa Mini LF, Super 35mm sensor, ARRI Signature Prime lens, RAW footage, cinematic color science, shallow depth of field, photorealistic, 8K ultra detailed, professional photography, film grain'
 
-async function pollPrediction(id: string, maxWait = 60): Promise<string> {
-  for (let i = 0; i < maxWait; i++) {
+async function pollReplicate(id: string): Promise<string> {
+  for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 3000))
     const poll = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
       headers: { 'Authorization': `Bearer ${REPLICATE_TOKEN}` }
     })
     const data = await poll.json()
     if (data.status === 'succeeded') return Array.isArray(data.output) ? data.output[0] : data.output
-    if (data.status === 'failed') throw new Error(data.error || 'Prediction failed')
+    if (data.status === 'failed') throw new Error(data.error || 'FaceFusion failed')
   }
-  throw new Error('Timeout after 3 minutes')
+  throw new Error('Timeout')
 }
 
 async function toReplicateUrl(base64DataUrl: string): Promise<string> {
@@ -38,7 +41,7 @@ async function toReplicateUrl(base64DataUrl: string): Promise<string> {
     body: buffer,
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(`File upload failed: ${data.detail || JSON.stringify(data)}`)
+  if (!res.ok) throw new Error(`Replicate file upload: ${data.detail || JSON.stringify(data)}`)
   return data.urls?.get || data.url
 }
 
@@ -54,51 +57,74 @@ export async function POST(req: NextRequest) {
       colorGrade,
       aspectRatio,
       addCinematic,
+      skipFaceFusion,
     } = await req.json()
 
-    if (!referenceUrl) {
-      return NextResponse.json({ error: 'Photo de référence manquante' }, { status: 400 })
+    if (!prompt) return NextResponse.json({ error: 'Prompt requis' }, { status: 400 })
+
+    // Build final prompt
+    const parts = [prompt, camera, lens, lighting, colorGrade].filter(Boolean)
+    if (addCinematic !== false) parts.push(CINEMATIC)
+    const finalPrompt = parts.join(', ')
+
+    // Map aspect ratio to OpenAI size
+    const sizeMap: Record<string, string> = {
+      '1:1': '1024x1024',
+      '16:9': '1792x1024',
+      '9:16': '1024x1792',
+      '4:5': '1024x1280',
+    }
+    const size = sizeMap[aspectRatio] || '1024x1024'
+
+    // ── ÉTAPE 1 : OpenAI gpt-image-1 ──
+    const openaiRes = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-1',
+        prompt: finalPrompt,
+        n: 1,
+        size,
+        quality: 'high',
+        output_format: 'url',
+      })
+    })
+
+    const openaiData = await openaiRes.json()
+    if (!openaiRes.ok) throw new Error(`OpenAI: ${openaiData.error?.message || JSON.stringify(openaiData)}`)
+
+    // Get image URL or base64
+    const generatedImage = openaiData.data?.[0]
+    const generatedUrl = generatedImage?.url || (generatedImage?.b64_json ? `data:image/png;base64,${generatedImage.b64_json}` : null)
+
+    if (!generatedUrl) throw new Error('OpenAI: pas d\'image générée')
+
+    // Si pas de photo de référence ou skipFaceFusion → retourne l'image OpenAI directement
+    if (!referenceUrl || skipFaceFusion) {
+      if (artistId) {
+        await supabase.from('artist_generations').insert({
+          artist_id: artistId,
+          image_url: generatedUrl,
+          prompt: finalPrompt,
+        })
+      }
+      return NextResponse.json({ url: generatedUrl, openai_url: generatedUrl })
     }
 
-    // Convertit base64 → URL Replicate
+    // ── ÉTAPE 2 : FaceFusion ──
     let faceImageUrl = referenceUrl
     if (referenceUrl.startsWith('data:')) {
       faceImageUrl = await toReplicateUrl(referenceUrl)
     }
 
-    // Build cinematic prompt
-    const parts = [prompt, camera, lens, lighting, colorGrade].filter(Boolean)
-    if (addCinematic !== false) parts.push(CINEMATIC)
-    const finalPrompt = parts.join(', ')
+    let templateUrl = generatedUrl
+    if (generatedUrl.startsWith('data:')) {
+      templateUrl = await toReplicateUrl(generatedUrl)
+    }
 
-    const w = aspectRatio === '16:9' ? 1344 : aspectRatio === '9:16' ? 768 : 1024
-    const h = aspectRatio === '16:9' ? 768 : aspectRatio === '9:16' ? 1344 : 1024
-
-    // ── ÉTAPE 1 : FLUX Pro Ultra → image haute qualité ──
-    const fluxRes = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro-ultra/predictions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${REPLICATE_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        input: {
-          prompt: finalPrompt,
-          aspect_ratio: aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : aspectRatio === '4:5' ? '4:5' : '1:1',
-          output_format: 'jpg',
-          output_quality: 100,
-          safety_tolerance: 5,
-          raw: true,
-        }
-      })
-    })
-
-    const fluxPred = await fluxRes.json()
-    if (!fluxRes.ok) throw new Error(`FLUX: ${fluxPred.detail || JSON.stringify(fluxPred)}`)
-
-    const generatedImageUrl = await pollPrediction(fluxPred.id, 40)
-
-    // ── ÉTAPE 2 : FaceFusion → swap le visage de l'artiste ──
     const fuseRes = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -108,8 +134,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         version: '52edbb2b42beb4e19242f0c9ad5717211a96c63ff1f0b0320caa518b2745f4f7',
         input: {
-          user_image: faceImageUrl,       // visage de l'artiste
-          template_image: generatedImageUrl, // image FLUX générée
+          user_image: faceImageUrl,
+          template_image: templateUrl,
         }
       })
     })
@@ -117,20 +143,19 @@ export async function POST(req: NextRequest) {
     const fusePred = await fuseRes.json()
     if (!fuseRes.ok) throw new Error(`FaceFusion: ${fusePred.detail || JSON.stringify(fusePred)}`)
 
-    const finalImageUrl = await pollPrediction(fusePred.id, 40)
+    const finalUrl = await pollReplicate(fusePred.id)
 
-    // Sauvegarde
     if (artistId) {
       await supabase.from('artist_generations').insert({
         artist_id: artistId,
-        image_url: finalImageUrl,
+        image_url: finalUrl,
         prompt: finalPrompt,
       })
     }
 
     return NextResponse.json({
-      url: finalImageUrl,
-      flux_url: generatedImageUrl, // image avant swap (debug)
+      url: finalUrl,
+      openai_url: generatedUrl,
     })
 
   } catch (err: any) {

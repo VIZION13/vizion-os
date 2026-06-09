@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Upload, Download, Wand2, Check, Trash2, Plus, Sparkles, ChevronDown, ChevronUp, User, X, Image } from 'lucide-react'
+import { Upload, Download, Wand2, Check, Plus, Sparkles, ChevronDown, ChevronUp, User } from 'lucide-react'
 
 interface ArtistProfile {
   id: string
@@ -13,55 +13,62 @@ interface ArtistProfile {
   artist_generations?: { id: string; image_url: string; prompt: string; created_at: string }[]
 }
 
-const KLING_STYLES = [
-  { label: 'Auto', value: '' },
-  { label: 'Réaliste', value: 'realistic' },
-  { label: 'Cinématique', value: 'cinematic' },
-  { label: 'Artistique', value: 'artistic' },
+const CAMERA_PRESETS = [
+  { label: 'ARRI Super 35', value: 'ARRI Alexa Mini LF, Super 35mm, ARRI Signature Prime lens, RAW' },
+  { label: 'RED Dragon', value: 'RED Dragon 6K cinema camera, cinema prime lens' },
+  { label: 'Sony Venice', value: 'Sony Venice 2, full frame, Zeiss Supreme Prime' },
+  { label: '35mm Film', value: 'Kodak Vision3 35mm film, analog grain' },
+  { label: 'Medium Format', value: 'Hasselblad X2D medium format, extreme detail' },
+]
+
+const LENS_PRESETS = [
+  { label: '24mm', value: '24mm wide angle lens' },
+  { label: '35mm', value: '35mm lens, natural perspective' },
+  { label: '50mm', value: '50mm standard lens' },
+  { label: '85mm Portrait', value: '85mm portrait lens, beautiful bokeh' },
+  { label: '135mm', value: '135mm telephoto, compressed perspective' },
+  { label: 'Anamorphic', value: 'anamorphic lens, oval bokeh, lens flares' },
+]
+
+const LIGHTING_PRESETS = [
+  { label: 'ARRI Studio', value: 'ARRI professional lighting, key light, rim light, bounce fill' },
+  { label: 'Golden Hour', value: 'golden hour sunlight, warm tones, long shadows' },
+  { label: 'Blue Hour', value: 'blue hour twilight, ambient city glow' },
+  { label: 'Neon Night', value: 'neon lights, urban night, colored reflections' },
+  { label: 'Dramatic', value: 'dramatic side lighting, chiaroscuro, deep shadows' },
+  { label: 'Soft Studio', value: 'large softbox, diffused beauty lighting' },
+]
+
+const COLOR_GRADES = [
+  { label: 'Teal & Orange', value: 'teal and orange color grade, blockbuster look' },
+  { label: 'Kodak Vision3', value: 'Kodak Vision3 color science, warm shadows' },
+  { label: 'Fuji Pro 400H', value: 'Fuji Pro 400H, pastel palette' },
+  { label: 'Desaturated', value: 'desaturated cinematic grade, muted tones' },
+  { label: 'Cold Blue', value: 'cold blue grade, steel tones, modern' },
+  { label: 'Moody Dark', value: 'moody dark grade, deep blacks, atmospheric' },
 ]
 
 const ASPECT_RATIOS = [
   { label: '1:1', value: '1:1' },
   { label: '16:9', value: '16:9' },
   { label: '9:16', value: '9:16' },
-  { label: '4:3', value: '4:3' },
-  { label: '3:4', value: '3:4' },
-]
-
-const CAMERA_PRESETS = [
-  { label: 'ARRI Super 35', value: 'shot on ARRI Alexa, Super 35mm, Signature Prime lens, RAW' },
-  { label: 'Cinématique', value: 'cinematic photography, shallow depth of field, film grain' },
-  { label: 'Editorial', value: 'fashion editorial, luxury magazine, professional studio' },
-  { label: 'Golden Hour', value: 'golden hour, warm sunlight, cinematic lighting' },
-  { label: 'Studio Pro', value: 'professional studio, three-point lighting, seamless backdrop' },
-  { label: 'Urban Night', value: 'urban night, neon lights, bokeh, city atmosphere' },
+  { label: '4:5', value: '4:5' },
 ]
 
 const GENRES = ['Trap', 'Drill', 'Afro', 'R&B', 'Pop', 'Rap FR', 'Dancehall']
-
-const REF_LABELS = [
-  { label: 'Visage', icon: '👤', tip: 'Photo portrait claire du visage' },
-  { label: 'Tenue', icon: '👗', tip: 'Photo de la tenue/vêtements' },
-  { label: 'Lieu', icon: '🏙️', tip: 'Photo du décor/lieu' },
-  { label: 'Style', icon: '🎨', tip: 'Photo du style visuel voulu' },
-  { label: 'Pose', icon: '🕴️', tip: 'Photo de la pose voulue' },
-  { label: 'Ambiance', icon: '🌆', tip: 'Photo de l\'ambiance' },
-  { label: 'Lumière', icon: '💡', tip: 'Photo de la lumière voulue' },
-  { label: 'Couleurs', icon: '🎭', tip: 'Photo des couleurs' },
-  { label: 'Accessoires', icon: '💎', tip: 'Photo des accessoires' },
-  { label: 'Bonus', icon: '⭐', tip: 'Image de référence bonus' },
-]
 
 export default function ArtistImagePage() {
   const [profiles, setProfiles] = useState<ArtistProfile[]>([])
   const [selectedProfile, setSelectedProfile] = useState<ArtistProfile | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadingProfiles, setLoadingProfiles] = useState(true)
-  const [generatedUrls, setGeneratedUrls] = useState<string[]>([])
+  const [generatedUrl, setGeneratedUrl] = useState<string | null>(null)
+  const [openaiUrl, setOpenaiUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showNewProfile, setShowNewProfile] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [loadingStep, setLoadingStep] = useState('')
+  const [skipFaceFusion, setSkipFaceFusion] = useState(false)
 
   // New profile
   const [newName, setNewName] = useState('')
@@ -73,15 +80,15 @@ export default function ArtistImagePage() {
 
   // Generation
   const [prompt, setPrompt] = useState('')
-  const [refImages, setRefImages] = useState<(string | null)[]>(Array(10).fill(null))
-  const [refImageNames, setRefImageNames] = useState<(string | null)[]>(Array(10).fill(null))
-  const [klingStyle, setKlingStyle] = useState('')
-  const [aspectRatio, setAspectRatio] = useState('16:9')
   const [camera, setCamera] = useState(CAMERA_PRESETS[0].value)
+  const [lens, setLens] = useState(LENS_PRESETS[3].value)
+  const [lighting, setLighting] = useState(LIGHTING_PRESETS[0].value)
+  const [colorGrade, setColorGrade] = useState(COLOR_GRADES[0].value)
+  const [aspectRatio, setAspectRatio] = useState('1:1')
+  const [addCinematic, setAddCinematic] = useState(true)
   const [enhancing, setEnhancing] = useState(false)
 
   const photoRef = useRef<HTMLInputElement>(null)
-  const refRefs = useRef<(HTMLInputElement | null)[]>(Array(10).fill(null))
 
   useEffect(() => { loadProfiles() }, [])
 
@@ -103,42 +110,6 @@ export default function ArtistImagePage() {
     reader.onload = ev => setNewPhotoPreview(ev.target?.result as string)
     reader.readAsDataURL(file)
   }
-
-  function handleRefImage(idx: number, e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => {
-      const newRefs = [...refImages]
-      const newNames = [...refImageNames]
-      newRefs[idx] = ev.target?.result as string
-      newNames[idx] = file.name
-      setRefImages(newRefs)
-      setRefImageNames(newNames)
-    }
-    reader.readAsDataURL(file)
-  }
-
-  function removeRefImage(idx: number) {
-    const newRefs = [...refImages]
-    const newNames = [...refImageNames]
-    newRefs[idx] = null
-    newNames[idx] = null
-    setRefImages(newRefs)
-    setRefImageNames(newNames)
-  }
-
-  // Auto-add profile photo as first reference
-  useEffect(() => {
-    if (selectedProfile?.reference_url) {
-      const newRefs = [...refImages]
-      newRefs[0] = selectedProfile.reference_url
-      setRefImages(newRefs)
-      const newNames = [...refImageNames]
-      newNames[0] = selectedProfile.name
-      setRefImageNames(newNames)
-    }
-  }, [selectedProfile])
 
   async function saveProfile() {
     if (!newName || !newPhoto) return
@@ -182,9 +153,10 @@ export default function ArtistImagePage() {
         module: 'clip',
         messages: [{
           role: 'user',
-          content: `Améliore ce prompt pour Kling Image 3.0 — photoréalisme cinématique :
+          content: `Améliore ce prompt pour générer une image photoréaliste cinématique avec OpenAI gpt-image-1 :
 "${prompt}"
-Réponds UNIQUEMENT avec le prompt amélioré en français et anglais mélangés, max 150 mots.`
+${selectedProfile ? `Artiste : ${selectedProfile.name}, genre : ${selectedProfile.genre}` : ''}
+Réponds UNIQUEMENT avec le prompt amélioré en anglais, max 200 mots. Décris le décor, la lumière, l'ambiance. Ne décris PAS le visage.`
         }]
       })
     })
@@ -205,34 +177,37 @@ Réponds UNIQUEMENT avec le prompt amélioré en français et anglais mélangés
   }
 
   async function generate() {
-    if (!prompt && refImages.filter(Boolean).length === 0) return
-    setLoading(true); setError(null); setGeneratedUrls([])
-    setLoadingStep('🎨 Kling Image 3.0 génère...')
+    if (!prompt) return
+    setLoading(true); setError(null); setGeneratedUrl(null); setOpenaiUrl(null)
+
+    const stepTimer1 = setTimeout(() => setLoadingStep('🎨 OpenAI gpt-image-1 génère...'), 100)
+    const stepTimer2 = setTimeout(() => setLoadingStep('🔄 FaceFusion swap le visage...'), 15000)
 
     try {
-      // Build final prompt with camera preset
-      const finalPrompt = camera ? `${prompt}, ${camera}` : prompt
-
-      // Get non-null reference images
-      const validRefs = refImages.filter(Boolean) as string[]
-
-      const res = await fetch('/api/kling-image', {
+      const res = await fetch('/api/face-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: finalPrompt,
-          referenceImages: validRefs,
           artistId: selectedProfile?.id,
-          style: klingStyle,
+          referenceUrl: selectedProfile?.reference_url || null,
+          prompt,
+          camera,
+          lens,
+          lighting,
+          colorGrade,
           aspectRatio,
+          addCinematic,
+          skipFaceFusion: skipFaceFusion || !selectedProfile?.reference_url,
         })
       })
-
       const data = await res.json()
+      clearTimeout(stepTimer1); clearTimeout(stepTimer2)
       if (data.error) throw new Error(data.error)
-      if (data.urls) setGeneratedUrls(data.urls)
+      setGeneratedUrl(data.url)
+      if (data.openai_url && data.openai_url !== data.url) setOpenaiUrl(data.openai_url)
       await loadProfiles()
     } catch (e: any) {
+      clearTimeout(stepTimer1); clearTimeout(stepTimer2)
       setError(e.message)
     }
     setLoading(false)
@@ -255,7 +230,18 @@ Réponds UNIQUEMENT avec le prompt amélioré en français et anglais mélangés
     } catch { window.open(url, '_blank') }
   }
 
-  const activeRefs = refImages.filter(Boolean).length
+  const Chips = ({ options, value, onChange }: { options: {label: string; value: string}[]; value: string; onChange: (v: string) => void }) => (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map(o => (
+        <button key={o.value} onClick={() => onChange(o.value)}
+          className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all ${value === o.value ? 'bg-fuchsia-500/30 border border-fuchsia-500/50 text-fuchsia-300' : 'bg-white/5 border border-white/10 text-white/40 hover:text-white/70'}`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+
+  const hasFaceRef = !!selectedProfile?.reference_url
 
   return (
     <div className="min-h-screen px-4 md:px-8 py-8 md:py-12 overflow-x-hidden">
@@ -266,20 +252,18 @@ Réponds UNIQUEMENT avec le prompt amélioré en français et anglais mélangés
         </div>
         <div>
           <h1 className="font-display font-black text-2xl md:text-3xl text-white">ARTIST IMAGE</h1>
-          <p className="text-white/40 text-xs">Kling Image 3.0 · Multi-référence · 2K HD</p>
+          <p className="text-white/40 text-xs">OpenAI gpt-image-1 · FaceFusion · Kling Video</p>
         </div>
       </div>
 
       {/* Workflow */}
       <div className="glass-card rounded-2xl border border-white/8 p-3 mb-6">
-        <div className="flex items-center gap-2 text-xs text-white/50 flex-wrap">
-          <span className="bg-fuchsia-500/20 text-fuchsia-300 px-2.5 py-1 rounded-lg">Jusqu'à 10 photos</span>
-          <span>→</span>
-          <span className="bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-lg">Kling Image 3.0</span>
-          <span>→</span>
-          <span className="bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-lg">2K HD</span>
-          <span>→</span>
-          <span className="bg-blue-500/20 text-blue-300 px-2.5 py-1 rounded-lg">Kling Video</span>
+        <div className="flex items-center gap-2 text-xs flex-wrap">
+          <span className="bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-lg">① OpenAI gpt-image-1</span>
+          <span className="text-white/20">→</span>
+          <span className={`px-2.5 py-1 rounded-lg ${hasFaceRef && !skipFaceFusion ? 'bg-violet-500/20 text-violet-300' : 'bg-white/5 text-white/20 line-through'}`}>② FaceFusion</span>
+          <span className="text-white/20">→</span>
+          <span className="bg-blue-500/20 text-blue-300 px-2.5 py-1 rounded-lg">③ Kling Video</span>
         </div>
       </div>
 
@@ -326,12 +310,12 @@ Réponds UNIQUEMENT avec le prompt amélioré en français et anglais mélangés
                 {newPhotoPreview ? (
                   <div className="flex items-center gap-3">
                     <img src={newPhotoPreview} alt="preview" className="w-16 h-16 rounded-xl object-cover" />
-                    <p className="text-emerald-400 text-sm">Photo chargée ✓</p>
+                    <p className="text-emerald-400 text-sm font-medium">Photo chargée ✓</p>
                   </div>
                 ) : (
                   <div>
                     <Upload size={18} className="text-white/30 mx-auto mb-1" />
-                    <p className="text-white/50 text-sm">Photo portrait de référence</p>
+                    <p className="text-white/50 text-sm">Photo portrait — visage clair, pas de lunettes</p>
                   </div>
                 )}
               </div>
@@ -387,183 +371,183 @@ Réponds UNIQUEMENT avec le prompt amélioré en français et anglais mélangés
         )}
       </div>
 
-      {/* Generation panel */}
-      <div className="space-y-4">
-        {/* Reference Images Grid — jusqu'à 10 */}
-        <div className="glass-card rounded-3xl border border-indigo-500/20 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Image size={16} className="text-indigo-400" />
-              <p className="text-indigo-400 font-bold text-sm">IMAGES DE RÉFÉRENCE</p>
+      {/* Selected artist */}
+      {selectedProfile && (
+        <div className="glass-card rounded-2xl border border-fuchsia-500/15 p-4 mb-4">
+          <div className="flex items-center gap-3">
+            {selectedProfile.reference_url && (
+              <img src={selectedProfile.reference_url} alt={selectedProfile.name} className="w-12 h-12 rounded-xl object-cover border border-fuchsia-500/30" />
+            )}
+            <div className="flex-1">
+              <p className="text-white font-bold text-sm">{selectedProfile.name}</p>
+              <p className="text-fuchsia-400 text-xs">{selectedProfile.genre}</p>
             </div>
-            <span className={`text-xs px-2.5 py-1 rounded-lg font-bold ${activeRefs > 0 ? 'bg-indigo-500/20 text-indigo-300' : 'bg-white/5 text-white/30'}`}>
-              {activeRefs}/10
-            </span>
-          </div>
-
-          <div className="grid grid-cols-5 gap-2">
-            {REF_LABELS.map((ref, idx) => (
-              <div key={idx} className="flex flex-col gap-1">
-                <div
-                  onClick={() => !refImages[idx] && refRefs.current[idx]?.click()}
-                  className={`aspect-square rounded-2xl border-2 overflow-hidden relative cursor-pointer transition-all ${
-                    refImages[idx]
-                      ? 'border-indigo-500/50'
-                      : 'border-dashed border-white/15 hover:border-white/30 flex items-center justify-center bg-white/3'
-                  }`}>
-                  {refImages[idx] ? (
-                    <>
-                      <img src={refImages[idx]!} alt={ref.label} className="w-full h-full object-cover" />
-                      <button
-                        onClick={e => { e.stopPropagation(); removeRefImage(idx) }}
-                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px]">
-                        ✕
-                      </button>
-                    </>
-                  ) : (
-                    <div className="text-center p-1">
-                      <p className="text-lg">{ref.icon}</p>
-                    </div>
-                  )}
-                </div>
-                <p className={`text-[10px] text-center truncate ${refImages[idx] ? 'text-indigo-400' : 'text-white/25'}`}>
-                  {ref.label}
-                </p>
-                <input
-                  ref={el => { refRefs.current[idx] = el }}
-                  type="file" accept="image/*"
-                  onChange={e => handleRefImage(idx, e)}
-                  className="hidden" />
-              </div>
-            ))}
-          </div>
-
-          <p className="text-white/20 text-xs mt-3 text-center">
-            👤 Visage · 👗 Tenue · 🏙️ Lieu · + jusqu'à 10 références
-          </p>
-        </div>
-
-        {/* Prompt + Settings */}
-        <div className="glass-card rounded-3xl border border-violet-500/20 p-5">
-          {/* Prompt */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-white/40 text-xs uppercase tracking-wider">Prompt *</p>
-              <button onClick={enhancePrompt} disabled={enhancing || !prompt}
-                className="flex items-center gap-1.5 text-xs text-violet-400 disabled:opacity-40">
-                <Sparkles size={11} />
-                {enhancing ? 'IA...' : 'Améliorer'}
-              </button>
-            </div>
-            <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={3}
-              placeholder="ex: image 1 habillé comme image 2 dans une salle de pole danse dans l'ambiance de image 3, cinématique, ARRI..."
-              className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-violet-500/50 resize-none text-sm" />
-          </div>
-
-          {/* Camera */}
-          <div className="mb-3">
-            <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Style caméra</p>
-            <div className="flex flex-wrap gap-1.5">
-              {CAMERA_PRESETS.map(c => (
-                <button key={c.value} onClick={() => setCamera(c.value)}
-                  className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all ${camera === c.value ? 'bg-violet-500/30 border border-violet-500/50 text-violet-300' : 'bg-white/5 border border-white/10 text-white/40 hover:text-white/70'}`}>
-                  {c.label}
+            {hasFaceRef && (
+              <div className="flex items-center gap-2">
+                <span className="text-white/30 text-xs">FaceFusion</span>
+                <button onClick={() => setSkipFaceFusion(!skipFaceFusion)}
+                  className={`w-10 h-5 rounded-full transition-all flex-shrink-0 ${!skipFaceFusion ? 'bg-fuchsia-500' : 'bg-white/20'}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white shadow mx-0.5 transition-all ${!skipFaceFusion ? 'translate-x-5' : 'translate-x-0'}`} />
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Style Kling */}
-          <div className="mb-3">
-            <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Style Kling</p>
-            <div className="flex gap-2">
-              {KLING_STYLES.map(s => (
-                <button key={s.value} onClick={() => setKlingStyle(s.value)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${klingStyle === s.value ? 'bg-indigo-500/30 border border-indigo-500/50 text-indigo-300' : 'bg-white/5 border border-white/10 text-white/40'}`}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Aspect ratio */}
-          <div className="mb-5">
-            <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Format</p>
-            <div className="flex gap-2">
-              {ASPECT_RATIOS.map(r => (
-                <button key={r.value} onClick={() => setAspectRatio(r.value)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${aspectRatio === r.value ? 'bg-fuchsia-500/30 border border-fuchsia-500/50 text-fuchsia-300' : 'bg-white/5 border border-white/10 text-white/40'}`}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button onClick={generate} disabled={loading || (!prompt && activeRefs === 0)}
-            className="w-full flex items-center gap-2 justify-center bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white font-bold px-6 py-4 rounded-2xl disabled:opacity-40 hover:opacity-90 transition-opacity">
-            <Wand2 size={18} />
-            {loading ? loadingStep || 'Génération...' : `Générer avec Kling Image 3.0 (${activeRefs} photo${activeRefs > 1 ? 's' : ''})`}
-          </button>
-
-          {loading && (
-            <div className="mt-4">
-              <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-fuchsia-500 to-violet-500 rounded-full animate-pulse" style={{width:'60%'}} />
-              </div>
-              <p className="text-white/30 text-xs text-center mt-2">Kling Image 3.0 · 2K HD · ~1-2 minutes</p>
-            </div>
-          )}
-        </div>
-
-        {/* Results */}
-        {generatedUrls.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-white/40 text-xs uppercase tracking-wider">{generatedUrls.length} image{generatedUrls.length > 1 ? 's' : ''} générée{generatedUrls.length > 1 ? 's' : ''}</p>
-            {generatedUrls.map((url, i) => (
-              <div key={i} className="glass rounded-2xl border border-fuchsia-500/20 overflow-hidden">
-                <img src={url} alt={`result-${i}`} className="w-full object-cover" />
-                <div className="p-3 flex gap-2">
-                  <button onClick={() => downloadImage(url, `vizion-artist-${Date.now()}.jpg`)}
-                    className="flex-1 flex items-center gap-2 justify-center bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-300 text-sm py-2.5 rounded-xl hover:bg-fuchsia-500/30 transition-colors">
-                    <Download size={14} /> Télécharger
-                  </button>
-                  <button onClick={() => {
-                    // Send to Kling video
-                    window.open(`https://klingai.com`, '_blank')
-                  }}
-                    className="flex items-center gap-1.5 bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs px-4 py-2.5 rounded-xl hover:bg-violet-500/30 transition-colors">
-                    🎬 Animer
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* History */}
-        {selectedProfile?.artist_generations && selectedProfile.artist_generations.length > 0 && (
-          <div>
-            <button onClick={() => setShowHistory(!showHistory)}
-              className="flex items-center gap-2 text-white/40 text-xs uppercase tracking-wider mb-3">
-              {showHistory ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-              Historique ({selectedProfile.artist_generations.length} images)
-            </button>
-            {showHistory && (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                {selectedProfile.artist_generations.map(gen => (
-                  <div key={gen.id} className="group relative rounded-2xl overflow-hidden">
-                    <img src={gen.image_url} alt="gen" className="w-full aspect-square object-cover" />
-                    <button onClick={() => downloadImage(gen.image_url)}
-                      className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 text-white hidden group-hover:flex items-center justify-center">
-                      <Download size={12} />
-                    </button>
-                  </div>
-                ))}
               </div>
             )}
           </div>
+          {hasFaceRef && !skipFaceFusion && (
+            <p className="text-white/30 text-xs mt-2">
+              ⚡ FaceFusion activé — le visage de {selectedProfile.name} sera swappé sur l'image générée
+            </p>
+          )}
+          {hasFaceRef && skipFaceFusion && (
+            <p className="text-white/25 text-xs mt-2">
+              FaceFusion désactivé — génération OpenAI uniquement
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Generation panel */}
+      <div className="glass-card rounded-3xl border border-violet-500/20 p-5 mb-4">
+        {/* Cinematic toggle */}
+        <div className="flex items-center justify-between mb-4 bg-white/3 rounded-2xl p-3 border border-white/8">
+          <div>
+            <p className="text-white/70 text-sm font-medium">🎬 Mode Cinématique ARRI</p>
+            <p className="text-white/30 text-xs">Super 35 · RAW · Signature Prime</p>
+          </div>
+          <button onClick={() => setAddCinematic(!addCinematic)}
+            className={`w-12 h-6 rounded-full transition-all flex-shrink-0 ${addCinematic ? 'bg-fuchsia-500' : 'bg-white/20'}`}>
+            <div className={`w-5 h-5 rounded-full bg-white shadow mx-0.5 transition-all ${addCinematic ? 'translate-x-6' : 'translate-x-0'}`} />
+          </button>
+        </div>
+
+        {/* Prompt */}
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-white/40 text-xs uppercase tracking-wider">Décris la scène *</p>
+            <button onClick={enhancePrompt} disabled={enhancing || !prompt}
+              className="flex items-center gap-1.5 text-xs text-fuchsia-400 disabled:opacity-40">
+              <Sparkles size={11} />
+              {enhancing ? 'IA...' : 'Améliorer'}
+            </button>
+          </div>
+          <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={3}
+            placeholder={selectedProfile
+              ? `ex: ${selectedProfile.name} sur un rooftop de Marseille au coucher du soleil, costume 4 pièces noir, vue mer...`
+              : 'ex: artiste rap sur un rooftop de Marseille, costume 4 pièces noir, coucher de soleil...'}
+            className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-fuchsia-500/50 resize-none text-sm" />
+        </div>
+
+        <div className="mb-3">
+          <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Caméra</p>
+          <Chips options={CAMERA_PRESETS} value={camera} onChange={setCamera} />
+        </div>
+        <div className="mb-3">
+          <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Objectif</p>
+          <Chips options={LENS_PRESETS} value={lens} onChange={setLens} />
+        </div>
+        <div className="mb-3">
+          <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Lumière</p>
+          <Chips options={LIGHTING_PRESETS} value={lighting} onChange={setLighting} />
+        </div>
+        <div className="mb-3">
+          <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Color Grade</p>
+          <Chips options={COLOR_GRADES} value={colorGrade} onChange={setColorGrade} />
+        </div>
+        <div className="mb-5">
+          <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Format</p>
+          <div className="flex gap-2 flex-wrap">
+            {ASPECT_RATIOS.map(r => (
+              <button key={r.value} onClick={() => setAspectRatio(r.value)}
+                className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${aspectRatio === r.value ? 'bg-fuchsia-500/30 border border-fuchsia-500/50 text-fuchsia-300' : 'bg-white/5 border border-white/10 text-white/40'}`}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button onClick={generate} disabled={loading || !prompt}
+          className="w-full flex items-center gap-2 justify-center bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white font-bold px-6 py-4 rounded-2xl disabled:opacity-40 hover:opacity-90 transition-opacity">
+          <Wand2 size={18} />
+          {loading ? loadingStep || 'Génération...' : selectedProfile ? `Générer avec ${selectedProfile.name}` : 'Générer'}
+        </button>
+
+        {loading && (
+          <div className="mt-4">
+            <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-fuchsia-500 to-violet-500 rounded-full animate-pulse"
+                style={{width: loadingStep.includes('FaceFusion') ? '75%' : '35%'}} />
+            </div>
+            <div className="flex justify-between text-xs text-white/25 mt-2">
+              <span className={loadingStep.includes('OpenAI') ? 'text-emerald-400' : ''}>① OpenAI</span>
+              {hasFaceRef && !skipFaceFusion && <span className={loadingStep.includes('FaceFusion') ? 'text-violet-400' : ''}>② FaceFusion</span>}
+              <span>✓ Résultat</span>
+            </div>
+            <p className="text-white/25 text-xs text-center mt-1">
+              {hasFaceRef && !skipFaceFusion ? '~2-3 minutes' : '~15 secondes'}
+            </p>
+          </div>
         )}
       </div>
+
+      {/* Results */}
+      {generatedUrl && (
+        <div className="space-y-3 mb-4">
+          {/* Final result */}
+          <div className="glass rounded-2xl border border-fuchsia-500/20 overflow-hidden">
+            <div className="flex items-center gap-2 p-3 border-b border-white/8">
+              <div className="w-2 h-2 rounded-full bg-fuchsia-500" />
+              <p className="text-fuchsia-400 text-xs font-bold uppercase tracking-wider">
+                {openaiUrl ? 'Résultat final — FaceFusion' : 'Résultat — OpenAI gpt-image-1'}
+              </p>
+            </div>
+            <img src={generatedUrl} alt="result" className="w-full object-cover" />
+            <div className="p-3 flex gap-2">
+              <button onClick={() => downloadImage(generatedUrl, `vizion-${selectedProfile?.name || 'artist'}-${Date.now()}.jpg`)}
+                className="flex-1 flex items-center gap-2 justify-center bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-300 text-sm py-2.5 rounded-xl hover:bg-fuchsia-500/30 transition-colors">
+                <Download size={14} /> Télécharger
+              </button>
+              <button onClick={() => window.open('https://klingai.com', '_blank')}
+                className="flex items-center gap-1.5 bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs px-4 py-2.5 rounded-xl hover:bg-violet-500/30 transition-colors">
+                🎬 Animer Kling
+              </button>
+            </div>
+          </div>
+
+          {/* OpenAI preview before face swap */}
+          {openaiUrl && (
+            <div className="glass rounded-2xl border border-white/8 overflow-hidden">
+              <div className="flex items-center gap-2 p-3 border-b border-white/8">
+                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                <p className="text-white/30 text-xs uppercase tracking-wider">Avant FaceFusion (OpenAI gpt-image-1)</p>
+              </div>
+              <img src={openaiUrl} alt="openai" className="w-full object-cover opacity-60" />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* History */}
+      {selectedProfile?.artist_generations && selectedProfile.artist_generations.length > 0 && (
+        <div>
+          <button onClick={() => setShowHistory(!showHistory)}
+            className="flex items-center gap-2 text-white/40 text-xs uppercase tracking-wider mb-3">
+            {showHistory ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            Historique ({selectedProfile.artist_generations.length} images)
+          </button>
+          {showHistory && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {selectedProfile.artist_generations.map(gen => (
+                <div key={gen.id} className="group relative rounded-2xl overflow-hidden">
+                  <img src={gen.image_url} alt="gen" className="w-full aspect-square object-cover" />
+                  <button onClick={() => downloadImage(gen.image_url)}
+                    className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 text-white hidden group-hover:flex items-center justify-center">
+                    <Download size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
