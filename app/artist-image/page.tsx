@@ -334,21 +334,28 @@ Réponds UNIQUEMENT avec le prompt amélioré en anglais, max 150 mots. Focus su
         ) : (
           <div className="flex gap-3 overflow-x-auto pb-2">
             {profiles.map(profile => (
-              <button key={profile.id}
-                onClick={() => setSelectedProfile(selectedProfile?.id === profile.id ? null : profile)}
-                className={`flex-shrink-0 w-24 rounded-2xl overflow-hidden border-2 transition-all ${selectedProfile?.id === profile.id ? 'border-fuchsia-500 scale-105' : 'border-white/10 hover:border-white/30'}`}>
-                {profile.reference_url ? (
-                  <img src={profile.reference_url} alt={profile.name} className="w-full h-20 object-cover" />
-                ) : (
-                  <div className="w-full h-20 bg-white/10 flex items-center justify-center">
-                    <User size={24} className="text-white/30" />
+              <div key={profile.id} className="flex-shrink-0 relative group">
+                <button
+                  onClick={() => setSelectedProfile(selectedProfile?.id === profile.id ? null : profile)}
+                  className={`w-24 rounded-2xl overflow-hidden border-2 transition-all block ${selectedProfile?.id === profile.id ? 'border-fuchsia-500 scale-105' : 'border-white/10 hover:border-white/30'}`}>
+                  {profile.reference_url ? (
+                    <img src={profile.reference_url} alt={profile.name} className="w-full h-20 object-cover" />
+                  ) : (
+                    <div className="w-full h-20 bg-white/10 flex items-center justify-center">
+                      <User size={24} className="text-white/30" />
+                    </div>
+                  )}
+                  <div className="bg-black/40 p-1.5">
+                    <p className="text-white text-xs font-medium truncate">{profile.name}</p>
+                    <p className="text-white/30 text-[10px]">{profile.genre}</p>
                   </div>
-                )}
-                <div className="bg-black/40 p-1.5">
-                  <p className="text-white text-xs font-medium truncate">{profile.name}</p>
-                  <p className="text-white/30 text-[10px]">{profile.genre}</p>
-                </div>
-              </button>
+                </button>
+                <button
+                  onClick={() => { if (confirm(`Supprimer "${profile.name}" ?`)) deleteProfile(profile.id) }}
+                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500/80 text-white hidden group-hover:flex items-center justify-center text-xs">
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -368,9 +375,13 @@ Réponds UNIQUEMENT avec le prompt amélioré en anglais, max 150 mots. Focus su
                 <p className="text-fuchsia-400 text-xs">{selectedProfile.genre}</p>
                 {selectedProfile.style && <p className="text-white/30 text-xs">{selectedProfile.style}</p>}
               </div>
-              <button onClick={() => deleteProfile(selectedProfile.id)}
-                className="text-white/20 hover:text-red-400 transition-colors p-2">
-                <Trash2 size={14} />
+              <button onClick={() => {
+                if (confirm(`Supprimer le profil "${selectedProfile.name}" ?`)) {
+                  deleteProfile(selectedProfile.id)
+                }
+              }}
+                className="flex items-center gap-1.5 text-xs text-red-400/60 hover:text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-3 py-1.5 rounded-xl transition-all">
+                <Trash2 size={12} /> Supprimer
               </button>
             </div>
           </div>

@@ -8,18 +8,15 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// GET — liste tous les profils
 export async function GET() {
   const { data, error } = await supabase
     .from('artist_profiles')
     .select('*, artist_generations(id, image_url, prompt, created_at)')
     .order('created_at', { ascending: false })
-
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ profiles: data || [] })
 }
 
-// POST — crée ou update un profil
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
@@ -31,16 +28,16 @@ export async function POST(req: NextRequest) {
 
     let referenceUrl = formData.get('reference_url') as string || ''
 
-    // Upload photo si fournie
     if (file && file.size > 0) {
       const filename = `${Date.now()}-${name.replace(/\s/g, '-')}.jpg`
       const buffer = Buffer.from(await file.arrayBuffer())
 
+      // Try mj-gallery bucket first, fallback to direct URL
       const { error: uploadError } = await supabase.storage
         .from('mj-gallery')
         .upload(`artists/${filename}`, buffer, {
-          contentType: 'image/jpeg',
-          upsert: false,
+          contentType: file.type || 'image/jpeg',
+          upsert: true,
         })
 
       if (!uploadError) {
@@ -48,11 +45,25 @@ export async function POST(req: NextRequest) {
           .from('mj-gallery')
           .getPublicUrl(`artists/${filename}`)
         referenceUrl = urlData.publicUrl
+      } else {
+        console.error('Upload error:', uploadError)
+        // Try without folder
+        const { error: uploadError2 } = await supabase.storage
+          .from('mj-gallery')
+          .upload(`artist-${filename}`, buffer, {
+            contentType: file.type || 'image/jpeg',
+            upsert: true,
+          })
+        if (!uploadError2) {
+          const { data: urlData } = supabase.storage
+            .from('mj-gallery')
+            .getPublicUrl(`artist-${filename}`)
+          referenceUrl = urlData.publicUrl
+        }
       }
     }
 
     if (id) {
-      // Update
       const { data, error } = await supabase
         .from('artist_profiles')
         .update({ name, style, genre, ...(referenceUrl ? { reference_url: referenceUrl } : {}) })
@@ -62,7 +73,6 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ profile: data })
     } else {
-      // Create
       const { data, error } = await supabase
         .from('artist_profiles')
         .insert({ name, style, genre, reference_url: referenceUrl })
@@ -76,10 +86,35 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE — supprime un profil
 export async function DELETE(req: NextRequest) {
-  const { id } = await req.json()
-  const { error } = await supabase.from('artist_profiles').delete().eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ success: true })
+  try {
+    const { id } = await req.json()
+
+    // Get profile to delete photo from storage
+    const { data: profile } = await supabase
+      .from('artist_profiles')
+      .select('reference_url')
+      .eq('id', id)
+      .single()
+
+    // Delete from storage if exists
+    if (profile?.reference_url) {
+      const url = profile.reference_url as string
+      const parts = url.split('/mj-gallery/')
+      if (parts.length > 1) {
+        await supabase.storage.from('mj-gallery').remove([parts[1]])
+      }
+    }
+
+    // Delete generations first
+    await supabase.from('artist_generations').delete().eq('artist_id', id)
+
+    // Delete profile
+    const { error } = await supabase.from('artist_profiles').delete().eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    return NextResponse.json({ success: true })
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
 }
