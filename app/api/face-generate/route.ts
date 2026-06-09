@@ -27,30 +27,25 @@ async function pollReplicate(id: string): Promise<string> {
   throw new Error('Timeout')
 }
 
-async function uploadToReplicate(buffer: Buffer, mimeType: string): Promise<string> {
-  const res = await fetch('https://api.replicate.com/v1/files', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${REPLICATE_TOKEN}`,
-      'Content-Type': mimeType,
-      'Content-Length': String(buffer.length),
-    },
-    body: new Uint8Array(buffer),
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(`Replicate upload: ${data.detail || JSON.stringify(data)}`)
-  return data.urls?.get || data.url
-}
-
-async function toReplicateUrl(input: string): Promise<string> {
-  // Already a public URL
-  if (input.startsWith('http')) return input
-
-  // base64 data URL
-  const matches = input.match(/^data:([^;]+);base64,(.+)$/)
+// Upload base64 vers Supabase Storage → retourne URL publique
+async function uploadToSupabase(base64DataUrl: string, filename: string): Promise<string> {
+  const matches = base64DataUrl.match(/^data:([^;]+);base64,(.+)$/)
   if (!matches) throw new Error('Invalid image format')
   const buffer = Buffer.from(matches[2], 'base64')
-  return uploadToReplicate(buffer, matches[1])
+  const ext = matches[1].includes('png') ? 'png' : 'jpg'
+  const path = `temp/${filename}.${ext}`
+
+  const { error } = await supabase.storage
+    .from('mj-gallery')
+    .upload(path, buffer, {
+      contentType: matches[1],
+      upsert: true,
+    })
+
+  if (error) throw new Error(`Supabase upload: ${error.message}`)
+
+  const { data } = supabase.storage.from('mj-gallery').getPublicUrl(path)
+  return data.publicUrl
 }
 
 export async function POST(req: NextRequest) {
@@ -106,18 +101,11 @@ export async function POST(req: NextRequest) {
     const generatedImage = openaiData.data?.[0]
     if (!generatedImage) throw new Error('OpenAI: pas d\'image générée')
 
-    // Récupère le base64 ou l'URL
-    let generatedBase64: string | null = generatedImage.b64_json || null
-    let generatedUrl: string | null = generatedImage.url || null
-
-    // Si base64, crée une data URL
-    const generatedDataUrl = generatedBase64
-      ? `data:image/png;base64,${generatedBase64}`
-      : generatedUrl
-
+    const b64 = generatedImage.b64_json
+    const generatedDataUrl = b64 ? `data:image/png;base64,${b64}` : generatedImage.url
     if (!generatedDataUrl) throw new Error('OpenAI: image invalide')
 
-    // Si pas de face fusion → retourne directement
+    // Si pas de FaceFusion → retourne directement
     if (!referenceUrl || skipFaceFusion) {
       if (artistId) {
         await supabase.from('artist_generations').insert({
@@ -129,11 +117,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ url: generatedDataUrl, openai_url: generatedDataUrl })
     }
 
-    // ── ÉTAPE 2 : Upload les deux images vers Replicate Files ──
-    const faceUrl = await toReplicateUrl(referenceUrl)
-    const templateUrl = await toReplicateUrl(generatedDataUrl)
+    // ── ÉTAPE 2 : Upload vers Supabase pour avoir des URLs publiques ──
+    const timestamp = Date.now()
 
-    // ── ÉTAPE 3 : FaceFusion ──
+    // Upload image générée par OpenAI
+    const templatePublicUrl = await uploadToSupabase(generatedDataUrl, `template-${timestamp}`)
+
+    // Upload photo artiste si c'est un base64
+    let facePublicUrl = referenceUrl
+    if (referenceUrl.startsWith('data:')) {
+      facePublicUrl = await uploadToSupabase(referenceUrl, `face-${timestamp}`)
+    }
+
+    // ── ÉTAPE 3 : FaceFusion avec URLs publiques ──
     const fuseRes = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -143,8 +139,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         version: '52edbb2b42beb4e19242f0c9ad5717211a96c63ff1f0b0320caa518b2745f4f7',
         input: {
-          user_image: faceUrl,
-          template_image: templateUrl,
+          user_image: facePublicUrl,
+          template_image: templatePublicUrl,
         }
       })
     })
