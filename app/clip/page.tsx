@@ -91,7 +91,7 @@ const MJ_MOODS = [
 ]
 
 export default function ClipPage() {
-  const [tab, setTab] = useState<'storyboard' | 'midjourney' | 'kling'>('midjourney')
+  const [tab, setTab] = useState<'storyboard' | 'midjourney' | 'gallery' | 'kling'>('midjourney')
 
   // Storyboard
   const [title, setTitle] = useState('')
@@ -130,6 +130,16 @@ export default function ClipPage() {
   const [klingJobs, setKlingJobs] = useState<KlingJob[]>([])
   const [klingPromptLoading, setKlingPromptLoading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const galleryRef = useRef<HTMLInputElement>(null)
+
+  // Gallery state
+  const [galleryItems, setGalleryItems] = useState<{id?: string; filename: string; url: string; prompt: string; tags: string; created_at: string}[]>([])
+  const [galleryLoading, setGalleryLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [galleryPrompt, setGalleryPrompt] = useState('')
+  const [galleryTags, setGalleryTags] = useState('')
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [galleryLoaded, setGalleryLoaded] = useState(false)
 
   // Poll Kling
   useState(() => {
@@ -354,6 +364,52 @@ Réponds UNIQUEMENT avec le prompt en anglais, max 150 mots.`
     succeed: 'text-emerald-400', failed: 'text-red-400',
   }
 
+  // Load gallery
+  async function loadGallery() {
+    if (galleryLoaded) return
+    setGalleryLoading(true)
+    try {
+      const res = await fetch('/api/mj-gallery')
+      const data = await res.json()
+      setGalleryItems(data.items || [])
+      setGalleryLoaded(true)
+    } catch {}
+    setGalleryLoading(false)
+  }
+
+  async function uploadToGallery(file: File) {
+    setUploading(true)
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('prompt', galleryPrompt)
+    fd.append('tags', galleryTags)
+    try {
+      const res = await fetch('/api/mj-gallery', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (data.url) {
+        setGalleryItems(prev => [{
+          filename: data.filename,
+          url: data.url,
+          prompt: galleryPrompt,
+          tags: galleryTags,
+          created_at: new Date().toISOString(),
+        }, ...prev])
+        setGalleryPrompt('')
+        setGalleryTags('')
+      }
+    } catch {}
+    setUploading(false)
+  }
+
+  async function deleteFromGallery(item: {id?: string; filename: string}) {
+    await fetch('/api/mj-gallery', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: item.filename, id: item.id })
+    })
+    setGalleryItems(prev => prev.filter(i => i.filename !== item.filename))
+  }
+
   const Section = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="mb-4">
       <p className="text-white/40 text-xs uppercase tracking-wider mb-2">{label}</p>
@@ -401,9 +457,10 @@ Réponds UNIQUEMENT avec le prompt en anglais, max 150 mots.`
         {[
           { id: 'storyboard', label: '🎬 Storyboard' },
           { id: 'midjourney', label: '🖼️ MidJourney Pro' },
+          { id: 'gallery', label: `📁 Galerie MJ${galleryItems.length > 0 ? ` (${galleryItems.length})` : ''}` },
           { id: 'kling', label: `🎥 Kling${klingJobs.length > 0 ? ` (${klingJobs.length})` : ''}` },
         ].map(({ id, label }) => (
-          <button key={id} onClick={() => setTab(id as any)}
+          <button key={id} onClick={() => { setTab(id as any); if (id === 'gallery') loadGallery() }}
             className={`px-4 py-2 rounded-2xl text-sm font-medium transition-all ${tab === id ? 'bg-violet-500/20 border border-violet-500/40 text-violet-300' : 'bg-white/5 border border-white/10 text-white/50 hover:text-white/80'}`}>
             {label}
           </button>
@@ -637,6 +694,150 @@ Réponds UNIQUEMENT avec le prompt en anglais, max 150 mots.`
                         <p className="text-white/40 text-xs mt-0.5 italic">{scene.ambiance}</p>
                       </div>
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── GALERIE MJ ── */}
+      {tab === 'gallery' && (
+        <div className="space-y-4">
+          {/* Upload zone */}
+          <div className="glass-card rounded-3xl border border-indigo-500/20 p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-lg">📁</span>
+              <p className="text-indigo-400 font-bold text-sm">GALERIE MIDJOURNEY</p>
+              <span className="text-white/30 text-xs ml-auto">{galleryItems.length} images</span>
+            </div>
+
+            {/* Upload inputs */}
+            <div className="space-y-3 mb-4">
+              <input value={galleryPrompt} onChange={e => setGalleryPrompt(e.target.value)}
+                placeholder="Prompt utilisé (optionnel)"
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-indigo-500/50" />
+              <input value={galleryTags} onChange={e => setGalleryTags(e.target.value)}
+                placeholder="Tags : trap, artiste, portrait, scène..."
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-2.5 text-white text-sm placeholder-white/20 focus:outline-none focus:border-indigo-500/50" />
+            </div>
+
+            <div
+              onClick={() => galleryRef.current?.click()}
+              className="border-2 border-dashed border-indigo-500/30 rounded-2xl p-6 text-center cursor-pointer hover:border-indigo-500/60 transition-colors">
+              {uploading ? (
+                <div>
+                  <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                  <p className="text-indigo-400 text-sm">Upload en cours...</p>
+                </div>
+              ) : (
+                <div>
+                  <Upload size={20} className="text-indigo-400/50 mx-auto mb-2" />
+                  <p className="text-white/60 text-sm font-medium">Ajouter des images MidJourney</p>
+                  <p className="text-white/30 text-xs mt-1">JPG, PNG, WebP — sélection multiple</p>
+                </div>
+              )}
+            </div>
+            <input ref={galleryRef} type="file" accept="image/*" multiple
+              onChange={async e => {
+                const files = Array.from(e.target.files || [])
+                for (const file of files) await uploadToGallery(file)
+                e.target.value = ''
+              }}
+              className="hidden" />
+          </div>
+
+          {/* Loading */}
+          {galleryLoading && (
+            <div className="glass rounded-3xl p-6 text-center">
+              <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              <p className="text-white/40 text-sm">Chargement de la galerie...</p>
+            </div>
+          )}
+
+          {/* Gallery grid */}
+          {!galleryLoading && galleryItems.length === 0 && galleryLoaded && (
+            <div className="glass rounded-3xl p-8 text-center">
+              <p className="text-4xl mb-3">🖼️</p>
+              <p className="text-white/40 text-sm">Galerie vide — upload tes images MidJourney</p>
+            </div>
+          )}
+
+          {galleryItems.length > 0 && (
+            <div>
+              {/* Selected image actions */}
+              {selectedImage && (
+                <div className="glass-card rounded-3xl border border-violet-500/20 p-4 mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-violet-400 text-sm font-medium">Image sélectionnée</p>
+                    <button onClick={() => setSelectedImage(null)} className="text-white/30 text-xs hover:text-white/60">✕ Désélectionner</button>
+                  </div>
+                  <img src={selectedImage} alt="selected" className="w-full max-h-48 object-cover rounded-xl mb-3" />
+                  <div className="flex gap-2">
+                    <button onClick={() => {
+                      // Convert URL to base64 for Kling
+                      fetch(selectedImage).then(r => r.blob()).then(blob => {
+                        const reader = new FileReader()
+                        reader.onload = ev => {
+                          const base64 = (ev.target?.result as string).split(',')[1]
+                          setKlingImage(base64)
+                          setKlingImageName('galerie-mj.jpg')
+                          setTab('kling')
+                          setSelectedImage(null)
+                        }
+                        reader.readAsDataURL(blob)
+                      })
+                    }}
+                      className="flex-1 flex items-center gap-2 justify-center bg-violet-500/20 border border-violet-500/30 text-violet-300 text-sm font-medium py-2.5 rounded-2xl hover:bg-violet-500/30 transition-colors">
+                      <Video size={14} /> Envoyer vers Kling
+                    </button>
+                    <button onClick={() => {
+                      navigator.clipboard.writeText(selectedImage)
+                      setCopied(selectedImage)
+                      setTimeout(() => setCopied(null), 2000)
+                    }}
+                      className="flex items-center gap-2 bg-white/5 border border-white/15 text-white/60 text-sm px-4 py-2.5 rounded-2xl hover:bg-white/10 transition-colors">
+                      {copied === selectedImage ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {galleryItems.map((item, i) => (
+                  <div key={item.filename} className="group relative">
+                    <button
+                      onClick={() => setSelectedImage(selectedImage === item.url ? null : item.url)}
+                      className={`w-full aspect-square rounded-2xl overflow-hidden border-2 transition-all ${selectedImage === item.url ? 'border-violet-500 scale-95' : 'border-transparent hover:border-white/30'}`}>
+                      <img src={item.url} alt={`mj-${i}`} className="w-full h-full object-cover" />
+                    </button>
+                    {/* Overlay on hover */}
+                    <div className="absolute inset-0 rounded-2xl bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-end p-2">
+                      {item.tags && <p className="text-white/70 text-xs line-clamp-1">{item.tags}</p>}
+                    </div>
+                    {/* Delete button */}
+                    <button onClick={() => deleteFromGallery(item)}
+                      className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500/80 text-white text-xs items-center justify-center hidden group-hover:flex">
+                      ✕
+                    </button>
+                    {/* Kling quick button */}
+                    <button onClick={() => {
+                      fetch(item.url).then(r => r.blob()).then(blob => {
+                        const reader = new FileReader()
+                        reader.onload = ev => {
+                          setKlingImage((ev.target?.result as string).split(',')[1])
+                          setKlingImageName(item.filename)
+                          setKlingPrompt(item.prompt || '')
+                          setTab('kling')
+                        }
+                        reader.readAsDataURL(blob)
+                      })
+                    }}
+                      className="absolute bottom-1.5 right-1.5 w-6 h-6 rounded-full bg-violet-500/80 text-white items-center justify-center hidden group-hover:flex">
+                      <Video size={10} />
+                    </button>
                   </div>
                 ))}
               </div>
