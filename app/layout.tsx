@@ -3,6 +3,7 @@ import './globals.css'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { VizionChat } from '@/components/chat/VizionChat'
+import { Providers } from './providers'
 
 export const metadata: Metadata = {
   title: 'VIZION OS v2',
@@ -43,14 +44,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="bg-[#080810] text-white antialiased">
-        <div className="flex min-h-screen relative">
-          <Sidebar />
-          <main className="flex-1 md:ml-64 pb-24 md:pb-0 pt-safe relative z-10 min-h-screen">
-            {children}
-          </main>
-        </div>
-        <MobileNav />
-        <VizionChat />
+        <Providers>
+          <div className="flex min-h-screen relative">
+            <Sidebar />
+            <main className="flex-1 md:ml-64 pb-24 md:pb-0 pt-safe relative z-10 min-h-screen">
+              {children}
+            </main>
+          </div>
+          <MobileNav />
+          <VizionChat />
+        </Providers>
       </body>
     </html>
   )
