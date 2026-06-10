@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Zap, Wand2, User } from 'lucide-react'
+import { Home, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Zap, Wand2, User, Calendar } from 'lucide-react'
 
 const nav = [
   { href: '/',             icon: Home,         label: 'Home',      color: 'from-violet-600 to-indigo-600' },
@@ -14,12 +14,12 @@ const nav = [
   { href: '/automix',      icon: Zap,           label: 'AutoMix',   color: 'from-violet-600 to-pink-600' },
   { href: '/image',        icon: Wand2,         label: 'Image',     color: 'from-fuchsia-600 to-violet-600' },
   { href: '/artist-image', icon: User,          label: 'Artist IA', color: 'from-fuchsia-600 to-pink-600' },
+  { href: '/calendar',     icon: Calendar,      label: 'Calendar',  color: 'from-violet-600 to-blue-500' },
   { href: '/memory',       icon: Brain,         label: 'Memory',    color: 'from-fuchsia-600 to-purple-600' },
 ]
 
 export function MobileNav() {
   const pathname = usePathname()
-
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-t border-white/8 pb-safe">
       <div className="flex overflow-x-auto scrollbar-hide px-2 py-2 gap-1">

@@ -2,25 +2,25 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Settings, Zap, Wand2, User } from 'lucide-react'
+import { Home, Clapperboard, Music2, Users, Briefcase, ClipboardList, Brain, Settings, Zap, Wand2, User, Calendar } from 'lucide-react'
 
 const nav = [
-  { href: '/',              icon: Home,          label: 'Home',       color: 'from-violet-600 to-indigo-600' },
-  { href: '/clip',          icon: Clapperboard,  label: 'Clip',       color: 'from-violet-600 to-purple-500' },
-  { href: '/music',         icon: Music2,         label: 'Music',      color: 'from-pink-600 to-rose-500' },
-  { href: '/artists',       icon: Users,          label: 'Artists',    color: 'from-sky-600 to-blue-500' },
-  { href: '/business',      icon: Briefcase,      label: 'Business',   color: 'from-orange-600 to-amber-500' },
-  { href: '/admin',         icon: ClipboardList,  label: 'Admin',      color: 'from-emerald-600 to-teal-500' },
-  { href: '/automix',       icon: Zap,            label: 'AutoMix',    color: 'from-violet-600 to-pink-600' },
-  { href: '/image',         icon: Wand2,          label: 'Image',      color: 'from-fuchsia-600 to-violet-600' },
-  { href: '/artist-image',  icon: User,           label: 'Artist IA',  color: 'from-fuchsia-600 to-pink-600' },
-  { href: '/memory',        icon: Brain,          label: 'Memory',     color: 'from-fuchsia-600 to-purple-600' },
-  { href: '/settings',      icon: Settings,       label: 'Settings',   color: 'from-slate-600 to-slate-500' },
+  { href: '/',             icon: Home,         label: 'Home',      color: 'from-violet-600 to-indigo-600' },
+  { href: '/clip',         icon: Clapperboard, label: 'Clip',      color: 'from-violet-600 to-purple-500' },
+  { href: '/music',        icon: Music2,        label: 'Music',     color: 'from-pink-600 to-rose-500' },
+  { href: '/artists',      icon: Users,         label: 'Artists',   color: 'from-sky-600 to-blue-500' },
+  { href: '/business',     icon: Briefcase,     label: 'Business',  color: 'from-orange-600 to-amber-500' },
+  { href: '/admin',        icon: ClipboardList, label: 'Admin',     color: 'from-emerald-600 to-teal-500' },
+  { href: '/automix',      icon: Zap,           label: 'AutoMix',   color: 'from-violet-600 to-pink-600' },
+  { href: '/image',        icon: Wand2,         label: 'Image',     color: 'from-fuchsia-600 to-violet-600' },
+  { href: '/artist-image', icon: User,          label: 'Artist IA', color: 'from-fuchsia-600 to-pink-600' },
+  { href: '/calendar',     icon: Calendar,      label: 'Calendar',  color: 'from-violet-600 to-blue-500' },
+  { href: '/memory',       icon: Brain,         label: 'Memory',    color: 'from-fuchsia-600 to-purple-600' },
+  { href: '/settings',     icon: Settings,      label: 'Settings',  color: 'from-slate-600 to-slate-500' },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
-
   return (
     <aside className="hidden md:flex flex-col w-56 min-h-screen bg-black/20 border-r border-white/5 p-4 gap-1">
       <div className="flex items-center gap-2 mb-6 px-2">
