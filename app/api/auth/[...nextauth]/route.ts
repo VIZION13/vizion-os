@@ -8,9 +8,10 @@ const handler = NextAuth({
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       authorization: {
         params: {
-          scope: 'openid email profile https://www.googleapis.com/auth/calendar',
+          scope: 'openid email profile https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events',
           access_type: 'offline',
           prompt: 'consent',
+          response_type: 'code',
         }
       }
     })
@@ -20,6 +21,7 @@ const handler = NextAuth({
       if (account) {
         token.accessToken = account.access_token
         token.refreshToken = account.refresh_token
+        token.expiresAt = account.expires_at
       }
       return token
     },
