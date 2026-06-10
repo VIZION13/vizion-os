@@ -2,52 +2,35 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Home, Clapperboard, Music2, Users, ClipboardList, Wand2, Brain } from 'lucide-react'
 
 const nav = [
-  { href: '/clip',    img: '/nav-clip.png',    label: 'Clip' },
-  { href: '/music',   img: '/nav-music.png',   label: 'Music' },
-  { href: '/image',   img: '/nav-image.png',   label: 'Image' },
-  { href: '/artists', img: '/nav-artist.png',  label: 'Artiste' },
-  { href: '/admin',   img: '/nav-admin.png',   label: 'Admin' },
+  { href: '/',        icon: Home,         label: 'Home',    color: 'from-violet-600 to-indigo-600' },
+  { href: '/clip',    icon: Clapperboard, label: 'Clip',    color: 'from-violet-600 to-purple-500' },
+  { href: '/music',   icon: Music2,        label: 'Music',   color: 'from-pink-600 to-rose-500' },
+  { href: '/image',   icon: Wand2,         label: 'Image',   color: 'from-fuchsia-600 to-violet-600' },
+  { href: '/artists', icon: Users,         label: 'Artiste', color: 'from-sky-600 to-blue-500' },
+  { href: '/admin',   icon: ClipboardList, label: 'Admin',   color: 'from-emerald-600 to-teal-500' },
+  { href: '/memory',  icon: Brain,         label: 'Memory',  color: 'from-fuchsia-600 to-purple-600' },
 ]
 
 export function MobileNav() {
   const pathname = usePathname()
-
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-safe">
-      {/* Glassmorphism background */}
-      <div className="bg-black/70 backdrop-blur-2xl border-t border-white/10 px-4 py-3">
-        <div className="flex items-center justify-around">
-          {nav.map(({ href, img, label }) => {
-            const active = pathname === href || (href !== '/' && pathname.startsWith(href))
-            return (
-              <Link key={href} href={href} className="flex flex-col items-center gap-1.5 group">
-                {/* Photo icon rond style iOS */}
-                <div className={`relative transition-all duration-200 ${active ? 'scale-110' : 'group-active:scale-95'}`}>
-                  {/* Glow effect quand actif */}
-                  {active && (
-                    <div className="absolute inset-0 rounded-2xl bg-violet-500/30 blur-md scale-125" />
-                  )}
-                  <div className={`relative w-14 h-14 rounded-2xl overflow-hidden border-2 transition-all ${active ? 'border-violet-400/80' : 'border-transparent'}`}>
-                    <img src={img} alt={label} className="w-full h-full object-cover" />
-                    {/* Overlay sombre si inactif */}
-                    {!active && (
-                      <div className="absolute inset-0 bg-black/30" />
-                    )}
-                  </div>
-                  {/* Dot indicateur */}
-                  {active && (
-                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-violet-400" />
-                  )}
-                </div>
-                <span className={`text-[10px] font-medium transition-colors ${active ? 'text-violet-300' : 'text-white/40'}`}>
-                  {label}
-                </span>
-              </Link>
-            )
-          })}
-        </div>
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-t border-white/8 pb-safe">
+      <div className="flex overflow-x-auto scrollbar-hide px-2 py-2 gap-1">
+        {nav.map(({ href, icon: Icon, label, color }) => {
+          const active = pathname === href || (href !== '/' && pathname.startsWith(href))
+          return (
+            <Link key={href} href={href}
+              className={`flex flex-col items-center gap-1 px-3 py-2 rounded-2xl flex-shrink-0 transition-all ${active ? 'bg-white/10' : 'hover:bg-white/5'}`}>
+              <div className={`w-7 h-7 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center`}>
+                <Icon size={14} className="text-white" />
+              </div>
+              <span className={`text-[10px] font-medium ${active ? 'text-white' : 'text-white/40'}`}>{label}</span>
+            </Link>
+          )
+        })}
       </div>
     </nav>
   )
