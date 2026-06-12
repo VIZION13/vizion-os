@@ -28,7 +28,8 @@ export default function AgentsHubPage() {
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-14">
         {/* Header */}
-        <div className="mb-12">
+        <div className="mb-12 flex items-start justify-between gap-4">
+          <div>
           <p className="text-cyan-400/70 text-xs tracking-[0.4em] uppercase mb-3">
             VIZION OS · Module Agents
           </p>
@@ -39,6 +40,13 @@ export default function AgentsHubPage() {
             Quatre agents autonomes au service du studio. Chaque agent agit via
             ses propres outils — les envois réels passent par ta validation.
           </p>
+          </div>
+          <Link
+            href="/agents/tasks"
+            className="flex-shrink-0 px-4 py-2.5 rounded-xl text-sm bg-amber-500/15 border border-amber-400/30 text-amber-300 hover:bg-amber-500/25 transition-colors"
+          >
+            📋 Tâches à valider
+          </Link>
         </div>
 
         {/* Grille agents */}

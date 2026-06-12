@@ -31,6 +31,8 @@ export default function AgentTasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
+  const [sending, setSending] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -53,6 +55,30 @@ export default function AgentTasksPage() {
     load();
   }
 
+  async function sendEmail(t: Task) {
+    let to = t.payload?.to;
+    if (!to || !String(to).includes("@")) {
+      to = window.prompt("Adresse email du destinataire :") ?? "";
+      if (!to.includes("@")) return;
+    }
+    setSending(t.id);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/agents/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: t.id, to }),
+      });
+      const data = await res.json();
+      setNotice(data.ok ? `✅ ${data.message}` : `❌ ${data.error}`);
+    } catch (e: any) {
+      setNotice(`❌ ${e.message}`);
+    } finally {
+      setSending(null);
+      load();
+    }
+  }
+
   function copyTask(t: Task) {
     const text =
       t.type === "email_draft"
@@ -73,8 +99,8 @@ export default function AgentTasksPage() {
         <div className="absolute bottom-0 -left-40 w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-3xl" />
       </div>
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-12">
-        <div className="flex items-center gap-4 mb-10">
+      <div className="relative z-10 max-w-4xl mx-auto px-6 py-12 pb-28">
+        <div className="flex items-center gap-4 mb-6">
           <Link href="/agents" className="text-white/40 hover:text-cyan-400 transition-colors text-sm">
             ← Agents
           </Link>
@@ -87,6 +113,12 @@ export default function AgentTasksPage() {
             </p>
           </div>
         </div>
+
+        {notice && (
+          <div className="mb-6 text-sm bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3">
+            {notice}
+          </div>
+        )}
 
         {loading && <p className="text-white/40">Chargement...</p>}
 
@@ -125,7 +157,7 @@ export default function AgentTasksPage() {
               </pre>
             )}
 
-            <div className="flex gap-2 mt-4">
+            <div className="flex gap-2 mt-4 flex-wrap">
               {t.status === "pending" && (
                 <>
                   <button
@@ -142,12 +174,21 @@ export default function AgentTasksPage() {
                   </button>
                 </>
               )}
-              {t.status === "approved" && (
+              {t.status === "approved" && t.type === "email_draft" && (
+                <button
+                  onClick={() => sendEmail(t)}
+                  disabled={sending === t.id}
+                  className="px-4 py-2 rounded-lg text-sm bg-cyan-500/20 border border-cyan-400/30 text-cyan-300 hover:bg-cyan-500/30 transition-colors disabled:opacity-40"
+                >
+                  {sending === t.id ? "Envoi..." : "📤 Envoyer"}
+                </button>
+              )}
+              {t.status === "approved" && t.type !== "email_draft" && (
                 <button
                   onClick={() => setStatus(t.id, "done")}
                   className="px-4 py-2 rounded-lg text-sm bg-cyan-500/20 border border-cyan-400/30 text-cyan-300 hover:bg-cyan-500/30 transition-colors"
                 >
-                  Marquer envoyé
+                  Marquer fait
                 </button>
               )}
               <button

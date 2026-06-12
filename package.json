@@ -28,6 +28,7 @@
     "next": "^15.3.0",
     "next-auth": "^4.24.14",
     "next-pwa": "^5.6.0",
+    "nodemailer": "^7.0.13",
     "openai": "^4.98.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
