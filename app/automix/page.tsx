@@ -686,7 +686,7 @@ Réponds UNIQUEMENT en JSON:
             <p className="text-white font-semibold text-lg mb-1">Upload ton instru</p>
             <p className="text-white/40 text-sm">MP3, WAV — L'IA détecte la tonalité</p>
           </div>
-          <input ref={instruRef} type="file" accept="audio/*" onChange={e=>{const f=e.target.files?.[0];if(f)handleInstruUpload(f)}} className="hidden"/>
+          <input ref={instruRef} type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff" onChange={e=>{const f=e.target.files?.[0];if(f)handleInstruUpload(f)}} className="hidden"/>
         </div>
       )}
 
